@@ -1,0 +1,9 @@
+﻿ID,Lugar,Motivo,Descartar
+AL,Carrasco,Registro 0.5 mm frente a 96.4 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion -0.06).,True
+PCV,Casavalle,Registro 2.5 mm frente a 96.4 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion 0.43).,True
+EBCN,Colon,Sus registros no son consistentes con los del resto de la red (correlacion -0.16); presento registros anomalos a lo largo del mes.,True
+PA,Lezica,Registro 1.0 mm frente a 96.4 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion -0.08).,True
+EBMA,Manga,Registro 2.5 mm frente a 96.4 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion 0.50).,True
+EBSA,Paso de la Arena,Registro 25.7 mm frente a 96.4 mm de mediana de la red.,False
+PY,Pta.Yeguas,Registro 179.8 mm frente a 96.4 mm de mediana de la red.,False
+PC,Punta Carretas,Registro 4.6 mm frente a 96.4 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion 0.55).,True

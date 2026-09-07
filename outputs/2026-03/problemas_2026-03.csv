@@ -1,0 +1,7 @@
+﻿ID,Lugar,Motivo,Descartar
+PCV,Casavalle,No registro precipitacion en todo el mes.,True
+EBNC,Chacarita,No registro precipitacion en todo el mes.,True
+EBCN,Colon,Presenta 62.01 % de datos faltantes en el mes; registro 32.3 mm frente a 139.6 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion -0.04).,True
+EBLE,La Esperanza,No registro precipitacion en todo el mes.,True
+PA,Lezica,Presenta 61.67 % de datos faltantes en el mes; registro 3.6 mm frente a 139.6 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion -0.02).,True
+PC,Punta Carretas,Registro 4.8 mm frente a 139.6 mm de mediana de la red; sus registros no son consistentes con los del resto de la red (correlacion -0.00).,True

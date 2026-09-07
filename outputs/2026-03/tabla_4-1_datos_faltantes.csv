@@ -1,0 +1,19 @@
+﻿ID,Lugar,Datos faltantes (%),Descartar por faltantes
+EBCN,Colon,62.01,True
+PA,Lezica,61.67,True
+PC,Punta Carretas,3.25,False
+AN,Centro,1.89,False
+EBNC,Chacarita,1.13,False
+AL,Carrasco,0.59,False
+EBCO,Malvin,0.25,False
+EBSV,Santiago Vazquez,0.21,False
+EBMA,Manga,0.2,False
+PCV,Casavalle,0.19,False
+EBSA,Paso de la Arena,0.19,False
+CCZ9,Curva de Maronas,0.16,False
+EBCE,Cerro,0.15,False
+EBLE,La Esperanza,0.14,False
+MB,Prado,0.13,False
+MI,Capurro,0.1,False
+PY,Pta.Yeguas,0.07,False
+LP,La Blanqueada,0.03,False

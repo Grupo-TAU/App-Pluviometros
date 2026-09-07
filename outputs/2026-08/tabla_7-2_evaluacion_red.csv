@@ -1,0 +1,19 @@
+﻿ID,Lugar,Analisis del registro de mediciones,Lectura
+MI,Capurro,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+AN,Centro,Presenta un salto en el registro de datos de precipitacion durante el evento y sus valores son consistentes.,Bien
+EBCE,Cerro,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+EBNC,Chacarita,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+CCZ9,Curva de Maronas,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+LP,La Blanqueada,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+EBLE,La Esperanza,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+EBCO,Malvin,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+EBSA,Paso de la Arena,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+MB,Prado,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+PY,Pta.Yeguas,Presenta registro de datos completo de precipitacion durante el evento.,Bien
+EBSV,Santiago Vazquez,Presenta un salto en el registro de datos de precipitacion durante el evento y sus valores son consistentes.,Bien
+EBCN,Colon,El equipo no se encontraba conectado el dia del evento.,Regular
+PC,Punta Carretas,El equipo no se encontraba conectado el dia del evento.,Regular
+AL,Carrasco,El equipo no registro precipitacion durante la duracion del evento.,Malo
+PCV,Casavalle,Presenta registro de datos de precipitacion durante el evento pero sus valores no son consistentes.,Malo
+PA,Lezica,El equipo no registro precipitacion durante la duracion del evento.,Malo
+EBMA,Manga,Presenta registro de datos de precipitacion durante el evento pero sus valores no son consistentes.,Malo
