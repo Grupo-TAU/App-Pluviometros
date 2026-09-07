@@ -155,26 +155,14 @@ def convertir_a_UTM(df_coord):
     Retorna:
     - DataFrame con las coordenadas UTM (X, Y).
     """
-    coordenadas_UTM_X = []
-    coordenadas_UTM_Y = []
-    
-    for _, row in df_coord.iterrows():
-        lat = row['latitud']
-        lon = row['longitud']
-        
-        # Convertir de Latitud/Longitud (EPSG:4326) a UTM (EPSG:32721)
-        x, y = transformer.transform(lon, lat)
-        
-        # Almacenar los resultados
-        coordenadas_UTM_X.append(x)
-        coordenadas_UTM_Y.append(y)
-    
-    df_coord = df_coord.drop('latitud', axis=1)
-    df_coord = df_coord.drop('longitud', axis=1)
-    
-    df_coord['X'] = coordenadas_UTM_X
-    df_coord['Y'] = coordenadas_UTM_Y
-    
+    coordenadas = [latlon_a_utm21s(fila['latitud'], fila['longitud'])
+                   for _, fila in df_coord.iterrows()]
+
+    df_coord = df_coord.drop(['latitud', 'longitud'], axis=1)
+
+    df_coord['X'] = [x for x, _ in coordenadas]
+    df_coord['Y'] = [y for _, y in coordenadas]
+
     return df_coord
 
 def leer_archivo_coordenadas_traduccion(archivo):

@@ -2,7 +2,8 @@ from Codigo.Instalador.Funciones_basicas import *
 from Codigo.Instalador.Funciones_tormenta import *
 from Codigo.Instalador.Funciones_mensual import *
 from Codigo.Instalador.Funciones_config import *
-from Codigo.Instalador.isoyetas import * 
+from Codigo.Instalador.Funciones_exportar import *
+from Codigo.Instalador.isoyetas import *
 import os
 
 
@@ -29,7 +30,125 @@ def aplicar_icono(ventana):
     except Exception:
         pass
 
-class Config(tk.Toplevel):  
+
+def centrar_ventana(ventana, ancho, alto):
+    """
+    Devuelve la geometria que deja a la ventana centrada en la pantalla.
+
+    Parametros:
+    - ventana: Ventana de tkinter sobre la que se mide la pantalla.
+    - ancho, alto: Dimensiones deseadas en pixeles.
+
+    Retorna:
+    - Cadena de geometria lista para pasarle a ventana.geometry().
+    """
+    izquierda = int(ventana.winfo_screenwidth() / 2 - ancho / 2)
+    arriba = int(ventana.winfo_screenheight() / 2 - alto / 2)
+
+    return f'{ancho}x{alto}+{izquierda}+{arriba}'
+
+
+def llenar_treeview(tabla, df, ancho_columna=50, tags=None):
+    """
+    Vuelca un DataFrame en un Treeview, reemplazando lo que hubiera.
+
+    Parametros:
+    - tabla: Treeview destino.
+    - df: DataFrame a mostrar.
+    - ancho_columna: Ancho en pixeles de cada columna.
+    - tags: Lista opcional con un tag por fila, para pintarlas segun su estado.
+    """
+    for item in tabla.get_children():
+        tabla.delete(item)
+
+    tabla["columns"] = df.columns.tolist()
+
+    for col in df.columns:
+        tabla.heading(col, text=col)
+        tabla.column(col, width=ancho_columna, anchor="center")
+
+    for posicion, (_, fila) in enumerate(df.iterrows()):
+        tabla.insert("", "end", values=fila.tolist(),
+                     tags=(tags[posicion],) if tags else ())
+
+
+def copiar_al_portapapeles(encabezados, filas):
+    """
+    Copia una tabla al portapapeles como texto tabulado, listo para pegar en Excel.
+
+    Parametros:
+    - encabezados: Lista con los titulos de las columnas.
+    - filas: Lista de filas, cada una como lista de valores.
+    """
+    texto = "\n".join(["\t".join(map(str, encabezados))] +
+                      ["\t".join(map(str, fila)) for fila in filas])
+    try:
+        pyperclip.copy(texto)
+    except Exception as error:
+        messagebox.showerror("Error", f"No se pudo copiar al portapapeles: {error}")
+
+
+def copiar_treeview_al_portapapeles(tabla):
+    """
+    Copia el contenido de un Treeview al portapapeles.
+
+    Parametros:
+    - tabla: Treeview a copiar.
+    """
+    copiar_al_portapapeles([tabla.heading(col, "text") for col in tabla["columns"]],
+                           [tabla.item(item, "values") for item in tabla.get_children()])
+
+
+def copiar_dataframe_al_portapapeles(df, encabezado_indice):
+    """
+    Copia un DataFrame al portapapeles, incluyendo su indice como primera columna.
+
+    Parametros:
+    - df: DataFrame a copiar.
+    - encabezado_indice: Titulo para la columna del indice.
+    """
+    copiar_al_portapapeles([encabezado_indice] + list(df.columns),
+                           [[idx] + list(fila) for idx, fila in df.iterrows()])
+
+
+def guardar_figuras(ventana, graficas, dpi=None):
+    """
+    Pide un directorio y guarda ahi un conjunto de graficas, informando al final que salio bien
+    y que no.
+
+    Cada grafica se genera dentro de su propio try para que una que falle no impida guardar las
+    demas: son varias por ventana y el operario suele necesitar aunque sea las que si salieron.
+
+    Parametros:
+    - ventana: Ventana que dispara el guardado (se usa para volver a traerla al frente).
+    - graficas: Lista de tuplas (nombre_archivo, funcion_sin_argumentos_que_devuelve_la_figura).
+    - dpi: Resolucion de salida. None deja la de matplotlib.
+    """
+    directorio = filedialog.askdirectory(title="Selecciona un directorio para guardar las gráficas")
+    ventana.lift()
+
+    if not directorio:
+        return
+
+    opciones = {'dpi': dpi} if dpi else {}
+
+    errores = []
+    for nombre_archivo, generar_figura in graficas:
+        try:
+            generar_figura().savefig(os.path.join(directorio, nombre_archivo), **opciones)
+        except Exception as error:
+            errores.append(f"{nombre_archivo}: {error}")
+
+    if errores:
+        messagebox.showwarning("Finalizado con errores",
+                               "Algunas gráficas no se pudieron generar:\n\n" + "\n".join(errores))
+    else:
+        messagebox.showinfo("Éxito", "Las gráficas se han guardado correctamente.")
+
+    ventana.lift()
+
+
+class Config(tk.Toplevel):
     # Ventana para la configuración de lugares, coordenadas y ID.
 
     def __init__(self, ventana_principal):
@@ -49,27 +168,13 @@ class Config(tk.Toplevel):
         self.lugares_faltantes_id = detectar_id_faltante_config(self.df_config)
         
         self.title("Ventana configuraciones")
-        self.geometry(self.centrar_ventana(800, 650))
+        self.geometry(centrar_ventana(self, 800, 650))
         self.config(background="white")
         aplicar_icono(self)
         
         self.protocol("WM_DELETE_WINDOW", self.ventana_principal.cerrar_todo) 
         
         self.crear_interfaz()
-    
-    def centrar_ventana(self, ancho, alto):
-        """
-        Calcula la posición para centrar la ventana en la pantalla.
-
-        :param ancho: Ancho de la ventana.
-        :param alto: Alto de la ventana.
-        :return: Posición de la ventana centrada.
-        """
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        position_top = int(screen_height / 2 - alto / 2)
-        position_left = int(screen_width / 2 - ancho / 2)
-        return f'{ancho}x{alto}+{position_left}+{position_top}'
     
     def crear_interfaz(self):  
         """
@@ -359,7 +464,7 @@ class VentanaValidador(tk.Toplevel):
         self.df_datos = self.ventana_principal.df_datos
         
         self.title("Ventana de Inicio")
-        self.geometry(self.centrar_ventana(500, 150))
+        self.geometry(centrar_ventana(self, 500, 150))
         self.config(background="white")
         aplicar_icono(self)
         
@@ -372,23 +477,6 @@ class VentanaValidador(tk.Toplevel):
         self.crear_interfaz()
         
         self.protocol("WM_DELETE_WINDOW", self.ventana_principal.cerrar_todo) 
-    
-    def centrar_ventana(self, ancho, alto):
-        """
-        Centra la ventana en la pantalla.
-        
-        Parámetros:
-        - ancho: Ancho de la ventana.
-        - alto: Alto de la ventana.
-        
-        Retorna:
-        - Cadena con las coordenadas de la ventana centrada.
-        """
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        position_top = int(screen_height / 2 - alto / 2)
-        position_left = int(screen_width / 2 - ancho / 2)
-        return f'{ancho}x{alto}+{position_left}+{position_top}'
     
     def crear_interfaz(self):
         """
@@ -447,7 +535,7 @@ class VentanaValidador(tk.Toplevel):
         self.archivos_validadores.append(entry)
         
         self.altura_ventana += self.incremento_altura
-        self.geometry(self.centrar_ventana(500, self.altura_ventana))
+        self.geometry(centrar_ventana(self, 500, self.altura_ventana))
     
     def seleccionar_archivo(self, entry):
         """
@@ -510,7 +598,7 @@ class VentanaInicio(tk.Tk):
         super().__init__()       
         self.title("Ventana de Inicio")
         self.config(background="white")
-        self.geometry(self.centrar_ventana(430, 380))
+        self.geometry(centrar_ventana(self, 430, 380))
         
         aplicar_icono(self)
         
@@ -568,14 +656,6 @@ class VentanaInicio(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.cerrar_todo) 
         
         self.mainloop()
-
-    def centrar_ventana(self, ancho, alto):
-        """Centra la ventana en la pantalla."""
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        position_top = int(screen_height / 2 - alto / 2)
-        position_left = int(screen_width / 2 - ancho / 2)
-        return f'{ancho}x{alto}+{position_left}+{position_top}'
 
     def crear_interfaz(self):
         """Crea los elementos gráficos de la interfaz."""
@@ -636,7 +716,7 @@ class VentanaInicio(tk.Tk):
         seleccion.config(background="white")
         tk.Label(seleccion, text="Seleccionar Tipo de análisis", font=("Arial", 10, "bold"), background="white").pack(pady=5)
         
-        self.analisis_seleccionado = ttk.Combobox(seleccion, values=["Tormenta", "Mensual"])
+        self.analisis_seleccionado = ttk.Combobox(seleccion, values=["Tormenta", "Mensual", "Exportar CSV"])
         self.analisis_seleccionado.pack(pady=5)
         self.analisis_seleccionado.set("")
         
@@ -644,6 +724,15 @@ class VentanaInicio(tk.Tk):
 
     def seleccionar_introducir_valores_inumet(self, event=None):
         """Habilita los campos de entrada según el tipo de análisis seleccionado."""
+        if self.analisis_seleccionado.get() == "Exportar CSV":
+            # La exportación sale del CSV de Grafana solo: no interviene INUMET.
+            self.archivo_inumet_text.delete(0, END)
+            self.archivo_inumet_text.config(state=DISABLED)
+            self.inumet_btn.config(state=DISABLED, text="  ")
+            self.label_inumet.config(text="INUMET (no se usa en la exportación) ")
+            self.habilitar_boton_comenzar()
+            return
+
         self.inumet_btn.config(state=NORMAL)
         self.archivo_inumet_text.config(state=NORMAL)
         if self.analisis_seleccionado.get() == "Mensual":
@@ -749,7 +838,8 @@ class VentanaInicio(tk.Tk):
                         self.archivo_inumet_text.insert(0, archivo) 
                         self.archivo_inumet_seleccionado = archivo  
                         
-                        verificador = leer_archivo_inumet(self.archivo_inumet_seleccionado)
+                        # Se lee para validar el formato; si falla, lo agarra el except de abajo.
+                        leer_archivo_inumet(self.archivo_inumet_seleccionado)
                         
                         self.habilitar_boton_comenzar()
                 except:
@@ -770,8 +860,8 @@ class VentanaInicio(tk.Tk):
 
     def habilitar_boton_comenzar(self, event=None):
         """Habilita o deshabilita el botón de 'Comenzar' según las condiciones."""
-        if self.archivo_principal_text.get() and self.analisis_seleccionado.get() == "Tormenta": 
-            self.comenzar_btn.config(state=NORMAL) 
+        if self.archivo_principal_text.get() and self.analisis_seleccionado.get() in ("Tormenta", "Exportar CSV"):
+            self.comenzar_btn.config(state=NORMAL)
         else:
             if self.analisis_seleccionado.get() == "Mensual" and self.archivo_principal_text.get() and self.archivo_inumet_text.get():
                 self.comenzar_btn.config(state=NORMAL) 
@@ -820,7 +910,11 @@ class VentanaInicio(tk.Tk):
         """
                       
         self.checkbox_inicio = True
-                                            
+
+        if self.analisis_seleccionado.get() == "Exportar CSV":
+            self.cerrar_ventana()
+            return VentanaExportar(self)
+
         df_config = cargar_config()
         df_config = agregar_equipos_nuevos_config(df_config, self.df_datos)
         self.df_config= eliminar_lugares_no_existentes_config(df_config, self.df_datos)
@@ -1326,7 +1420,7 @@ class VentanaTR(tk.Toplevel):
         self.tr_tabla_selector.set(self.tr_seleccionado)
         self.tr_tabla_selector.bind("<<ComboboxSelected>>", self.actualizar_tr_tabla)
 
-        copiar_tabla_btn = tk.Button(frame_controles_tabla, text="Copiar", command=self.copiar_tabla_portapapeles, font=("Arial", 10, "bold"), background="white")
+        copiar_tabla_btn = tk.Button(frame_controles_tabla, text="Copiar", command=lambda: copiar_treeview_al_portapapeles(self.tabla_tr), font=("Arial", 10, "bold"), background="white")
         copiar_tabla_btn.pack(side="left", padx=5, pady=5)
 
         frame_tabla = tk.Frame(frame_tabla_container)
@@ -1415,25 +1509,6 @@ class VentanaTR(tk.Toplevel):
             fila.append(referencias_por_duracion.get(duracion, ""))
             self.tabla_tr.insert("", "end", values=fila)
     
-    def copiar_tabla_portapapeles(self):
-        """
-        Copia el contenido de la tabla en el portapapeles en formato de texto tabulado.
-        """
-        items = self.tabla_tr.get_children()
-        
-        datos_tabla = []
-        
-        encabezados = [self.tabla_tr.heading(col, "text") for col in self.tabla_tr["columns"]]
-        datos_tabla.append("\t".join(encabezados))
-        
-        for item in items:
-            valores = self.tabla_tr.item(item, "values")
-            datos_tabla.append("\t".join(map(str, valores)))
-        
-        texto_tabla = "\n".join(datos_tabla)
-        
-        pyperclip.copy(texto_tabla)
-
     def actualizar_tr_tabla(self, event):
         """
         Actualiza la tabla de tormentas según el TR seleccionado.
@@ -1579,33 +1654,29 @@ class VentanaTR(tk.Toplevel):
         Retorna:
         - None
         """
-        directorio = filedialog.askdirectory(title="Selecciona un directorio para guardar las gráficas")
-        self.lift()
-        
-        if directorio:
-            if self.ultima_grafica == "pluviómetro":
-                pluvio = self.pluv_selector.get()
-                nombre_archivo = f"grafica_{pluvio}.png"
-                nombre_archivo_ampliada = f"grafica_ampliada_{pluvio}.png"
-                precipitaciones = calcular_precipitacion_pluvio(self.lluvia_filtrada, pluvio)
-                valores_precipitaciones = [tup[1] for tup in precipitaciones]
-                fig = grafica_tr([var.get() for var in self.lista_tr], valores_precipitaciones, 
-                                float(self.limite_precipitacion_selector.get()), float(self.limite_tiempo_selector.get()), pluvio, "Precipitación vs. Duración de Tormenta", figsize=(8,6))
-                fig_ampliada = grafica_tr([var.get() for var in self.lista_tr], valores_precipitaciones, 
-                                    float(self.limite_precipitacion_selector_ampliada.get()), float(self.limite_tiempo_selector_ampliada.get()), pluvio, "Grafica ampliada", figsize=(8,6))
-            else:
-                nombre_archivo = "grafica_total.png"
-                nombre_archivo_ampliada = "grafica_ampliada_total.png"
-                valores_precipitaciones = [tup[1] for tup in self.tr_precipitaciones_totales]
-                fig = grafica_tr([var.get() for var in self.lista_tr], valores_precipitaciones, float(self.limite_precipitacion_selector.get()), float(self.limite_tiempo_selector.get()), "RHM", "Precipitación vs. Duración de Tormenta", figsize=(8,6))
-                fig_ampliada  = grafica_tr([var.get() for var in self.lista_tr], valores_precipitaciones, float(self.limite_precipitacion_selector_ampliada.get()), float(self.limite_tiempo_selector_ampliada.get()), "RHM", "Grafica ampliada", figsize=(8,6))
+        if self.ultima_grafica == "pluviómetro":
+            pluvio = self.pluv_selector.get()
+            sufijo = pluvio
+            valores_precipitaciones = [tup[1] for tup in calcular_precipitacion_pluvio(self.lluvia_filtrada, pluvio)]
+        else:
+            pluvio = "RHM"
+            sufijo = "total"
+            valores_precipitaciones = [tup[1] for tup in self.tr_precipitaciones_totales]
 
-            fig.savefig(f"{directorio}/{nombre_archivo}")
-            
-            fig_ampliada.savefig(f"{directorio}/{nombre_archivo_ampliada}")
-            
-            messagebox.showinfo("Éxito", "Las gráficas se han guardado correctamente.")
-            self.lift()
+        lista_tr = [var.get() for var in self.lista_tr]
+
+        guardar_figuras(self, [
+            (f"grafica_{sufijo}.png",
+             lambda: grafica_tr(lista_tr, valores_precipitaciones,
+                                float(self.limite_precipitacion_selector.get()),
+                                float(self.limite_tiempo_selector.get()),
+                                pluvio, "Precipitación vs. Duración de Tormenta", figsize=(8, 6))),
+            (f"grafica_ampliada_{sufijo}.png",
+             lambda: grafica_tr(lista_tr, valores_precipitaciones,
+                                float(self.limite_precipitacion_selector_ampliada.get()),
+                                float(self.limite_tiempo_selector_ampliada.get()),
+                                pluvio, "Grafica ampliada", figsize=(8, 6))),
+        ])
                         
     def cerrar_ventana(self):
         """
@@ -1828,7 +1899,7 @@ class VentanaPrincipalTormenta(tk.Toplevel):
         frame_boton.config(background="white")
 
         # Crear un botón en el frame_boton
-        copiar_btn = tk.Button(frame_boton, text="Copiar", command=self.copiar_tabla_acumulado_al_portapapeles, background="white")
+        copiar_btn = tk.Button(frame_boton, text="Copiar", command=lambda: copiar_treeview_al_portapapeles(self.tabla_acumulado_total), background="white")
         copiar_btn.pack(side="left")
         
         # Crear un Frame para la tabla (Treeview)
@@ -1852,16 +1923,7 @@ class VentanaPrincipalTormenta(tk.Toplevel):
         else:
             self.df_acumulados_total["INUMET"] = ""
         
-        self.tabla_acumulado_total["columns"] = self.df_acumulados_total.columns.tolist()
-        
-        # Configurar los encabezados de las columnas
-        for col in self.df_acumulados_total.columns:
-            self.tabla_acumulado_total.heading(col, text=col)
-            self.tabla_acumulado_total.column(col, width=50, anchor="center")  # Ajustar ancho y alineación
-
-        # Insertar los datos
-        for i, row in self.df_acumulados_total.iterrows():
-            self.tabla_acumulado_total.insert("", "end", values=row.tolist())
+        llenar_treeview(self.tabla_acumulado_total, self.df_acumulados_total)
             
         # Vincular eventos para editar la columna "INUMET"
         self.tabla_acumulado_total.bind("<Double-1>", self.editar_celda_inumet) 
@@ -1917,9 +1979,6 @@ class VentanaPrincipalTormenta(tk.Toplevel):
             entry.focus()
 
     def actualizar_acumulado_total(self):
-        # Elimina todos los elementos existentes
-        for item in self.tabla_acumulado_total.get_children():
-            self.tabla_acumulado_total.delete(item)
         df_acumulados_filtrado = self.filtrar_pluvios_seleccionados(self.df_acumulados)
         
         self.df_acumulados_total = acumulado_total(df_acumulados_filtrado)
@@ -1930,36 +1989,8 @@ class VentanaPrincipalTormenta(tk.Toplevel):
         else:
             self.df_acumulados_total["INUMET"] = ""
         
-        self.tabla_acumulado_total["columns"] = self.df_acumulados_total.columns.tolist()
-        
-        # Configurar los encabezados de las columnas
-        for col in self.df_acumulados_total.columns:
-            self.tabla_acumulado_total.heading(col, text=col)
-            self.tabla_acumulado_total.column(col, width=50, anchor="center")  # Ajustar ancho y alineación
-
-        # Insertar los datos
-        for i, row in self.df_acumulados_total.iterrows():
-            self.tabla_acumulado_total.insert("", "end", values=row.tolist())
+        llenar_treeview(self.tabla_acumulado_total, self.df_acumulados_total)
           
-    def copiar_tabla_acumulado_al_portapapeles(self):
-        # Extraer los datos de la tabla (celdas) y convertirlo en un formato adecuado para copiar
-        table_data = []
-
-        # Agregar encabezados de columna
-        headers = self.df_acumulados_total.columns.tolist()
-        table_data.append("\t".join(headers))
-        
-        # Agregar filas de datos
-        for row_id in self.tabla_acumulado_total.get_children():
-            row_values = self.tabla_acumulado_total.item(row_id)["values"]
-            table_data.append("\t".join(map(str, row_values)))
-        
-        # Convertir la lista de filas en un string con saltos de línea
-        table_str = "\n".join(table_data)
-        
-        # Copiar el texto al portapapeles usando pyperclip
-        pyperclip.copy(table_str)
-            
     def crear_checkboxes(self):
         frame_checkboxes = tk.Frame(self)
         frame_checkboxes.pack(fill="both", expand=True)
@@ -2128,40 +2159,16 @@ class VentanaPrincipalTormenta(tk.Toplevel):
             messagebox.showwarning("Advertencia", "Seleccione al menos un pluviómetro.")
             return
 
-        # Cuadro de diálogo para seleccionar directorio
-        directorio = filedialog.askdirectory(title="Selecciona un directorio para guardar las gráficas")
-        if not directorio:
-            return  # El usuario canceló
+        guardar_figuras(self, [
+            ("grafica instantaneas.png",
+             lambda: graficar_lluvia_instantanea_tormenta(lluvia_filtrada_inst, self.grilla_temporal_inst)),
+            ("grafica acumulado.png",
+             lambda: graficar_lluvia_acumulado_tormenta(self.filtrar_pluvios_seleccionados(self.df_acumulados),
+                                                        self.grilla_temporal_inst)),
+            ("grafica mensual isoyetas.png",
+             lambda: graficar_isoyetas(self.nombres_config_isoyetas(), self.seleccionar_pluv_isoyetas())),
+        ])
 
-        errores = []
-
-        # Gráfico de lluvia instantánea
-        try:
-            fig_inst = graficar_lluvia_instantanea_tormenta(lluvia_filtrada_inst, self.grilla_temporal_inst)
-            fig_inst.savefig(f"{directorio}/grafica instantaneas.png")
-        except Exception as e:
-            errores.append(f"Gráfica lluvia instantánea: {str(e)}")
-
-        # Gráfico acumulado
-        try:
-            lluvia_filtrada_acum = self.filtrar_pluvios_seleccionados(self.df_acumulados)
-            fig_acum = graficar_lluvia_acumulado_tormenta(lluvia_filtrada_acum, self.grilla_temporal_inst)
-            fig_acum.savefig(f"{directorio}/grafica acumulado.png")
-        except Exception as e:
-            errores.append(f"Gráfica lluvia acumulada: {str(e)}")
-
-        # Gráfico isoyetas
-        try:
-            fig_isoyetas = graficar_isoyetas(self.nombres_config_isoyetas(), self.seleccionar_pluv_isoyetas())
-            fig_isoyetas.savefig(f"{directorio}/grafica mensual isoyetas.png")
-        except Exception as e:
-            errores.append(f"Gráfica isoyetas: {str(e)}")
-
-        if errores:
-            messagebox.showwarning("Finalizado con errores", "Se completó el guardado, pero ocurrieron errores:\n\n" + "\n".join(errores))
-        else:
-            messagebox.showinfo("Éxito", "Gráficas guardadas correctamente.")
-   
 
     def cerrar_ventana(self):
         self.destroy()
@@ -2306,7 +2313,7 @@ class VentanaPrincipalMensual(tk.Toplevel):
         frame_boton.config(background="white")
         
         # Crear un botón en el frame_boton
-        copiar_btn = tk.Button(frame_boton, text="Copiar", command=self.copiar_tabla_al_portapapeles_correlacion, background="white")
+        copiar_btn = tk.Button(frame_boton, text="Copiar", command=lambda: copiar_dataframe_al_portapapeles(self.df_correlacion, 'Índices'), background="white")
         copiar_btn.pack(side="left")
         
         # Crear un Frame para la tabla (Treeview)
@@ -2341,25 +2348,6 @@ class VentanaPrincipalMensual(tk.Toplevel):
         # Mostrar el Treeview en la interfaz
         self.tree.pack(fill="both", expand=True) 
             
-    def copiar_tabla_al_portapapeles_correlacion(self):
-        # Extraer los datos de la tabla (celdas) y convertirlo en un formato adecuado para Excel
-        table_data = []
-        
-        # Agregar encabezados de columna
-        headers = ["Índices"] + list(self.df_correlacion.columns)
-        table_data.append("\t".join(headers))
-        
-        # Agregar filas de datos
-        for idx, row in self.df_correlacion.iterrows():
-            row_values = [str(idx)] + list(map(str, row))
-            table_data.append("\t".join(row_values))
-        
-        # Convertir la lista de filas en un string con saltos de línea
-        table_str = "\n".join(table_data)
-        
-        # Copiar el texto al portapapeles usando pyperclip
-        pyperclip.copy(table_str)
-
     def mostrar_acumulados_totales(self):
         tk.Label(self.info_frame, text="Acumulados totales:", font=("Arial", 10, "bold"), background="white").pack(pady=5)
 
@@ -2374,7 +2362,7 @@ class VentanaPrincipalMensual(tk.Toplevel):
         frame_boton.config(background="white")
 
         # Crear un botón en el frame_boton
-        copiar_btn = tk.Button(frame_boton, text="Copiar", command=self.copiar_tabla_al_portapapeles_acumulado_total, background="white")
+        copiar_btn = tk.Button(frame_boton, text="Copiar", command=lambda: copiar_treeview_al_portapapeles(self.tabla_acumulado_total), background="white")
         copiar_btn.pack(side="left")
         
         # Crear un Frame para la tabla (Treeview)
@@ -2401,16 +2389,7 @@ class VentanaPrincipalMensual(tk.Toplevel):
         
         df_acumulados_total = df_acumulados_total.round(1)
         
-        self.tabla_acumulado_total["columns"] = df_acumulados_total.columns.tolist()
-        
-        # Configurar los encabezados de las columnas
-        for col in df_acumulados_total.columns:
-            self.tabla_acumulado_total.heading(col, text=col)
-            self.tabla_acumulado_total.column(col, width=50, anchor="center")  # Ajustar ancho y alineación
-
-        # Insertar los datos
-        for i, row in df_acumulados_total.iterrows():
-            self.tabla_acumulado_total.insert("", "end", values=row.tolist())
+        llenar_treeview(self.tabla_acumulado_total, df_acumulados_total)
 
         # Crear un Scrollbar horizontal
         scrollbar = tk.Scrollbar(frame_tabla_acumulado_total, orient="horizontal", command=self.tabla_acumulado_total.xview, background="white")
@@ -2421,9 +2400,6 @@ class VentanaPrincipalMensual(tk.Toplevel):
         self.tabla_acumulado_total.pack(fill="both", expand=True)
 
     def actualizar_acumulado_total(self):
-        # Elimina todos los elementos existentes
-        for item in self.tabla_acumulado_total.get_children():
-            self.tabla_acumulado_total.delete(item)
             
         df_acumulados_diarios_traducido = traducir_columnas_lugar_a_id(self.df_config, self.df_acumulados_diarios_mes_real)
         df_acumulados_filtrado = self.filtrar_pluvios_seleccionados(df_acumulados_diarios_traducido)
@@ -2433,43 +2409,7 @@ class VentanaPrincipalMensual(tk.Toplevel):
         df_acumulados_total = acumulado_total(df_acumulados_total)
         df_acumulados_total = df_acumulados_total.round(1)
         
-        self.tabla_acumulado_total["columns"] = df_acumulados_total.columns.tolist()
-        
-        # Configurar los encabezados de las columnas
-        for col in df_acumulados_total.columns:
-            self.tabla_acumulado_total.heading(col, text=col)
-            self.tabla_acumulado_total.column(col, width=50, anchor="center")  # Ajustar ancho y alineación
-
-        # Insertar los datos
-        for i, row in df_acumulados_total.iterrows():
-            self.tabla_acumulado_total.insert("", "end", values=row.tolist())
-
-    def copiar_tabla_al_portapapeles_acumulado_total(self):
-        # Extraer los datos de la tabla (celdas) y convertirlo en un formato adecuado para copiar
-        table_data = []
-
-        df_acumulados_diarios_traducido = traducir_columnas_lugar_a_id(self.df_config, self.df_acumulados_diarios_mes_real)
-        df_acumulados_filtrado = self.filtrar_pluvios_seleccionados(df_acumulados_diarios_traducido)
-
-        df_acumulados_total = acumulado_diarios_total(df_acumulados_filtrado)
-
-        df_acumulados_total = acumulado_total(df_acumulados_total)
-        df_acumulados_total = df_acumulados_total.round(1)
-        
-        # Agregar encabezados de columna
-        headers = df_acumulados_total.columns.tolist()
-        table_data.append("\t".join(headers))
-        
-        # Agregar filas de datos
-        for row_id in self.tabla_acumulado_total.get_children():
-            row_values = self.tabla_acumulado_total.item(row_id)["values"]
-            table_data.append("\t".join(map(str, row_values)))
-        
-        # Convertir la lista de filas en un string con saltos de línea
-        table_str = "\n".join(table_data)
-        
-        # Copiar el texto al portapapeles usando pyperclip
-        pyperclip.copy(table_str)
+        llenar_treeview(self.tabla_acumulado_total, df_acumulados_total)
 
     def mostrar_tabla_percentiles(self):
         mes_str = numero_a_mes(self.mes)
@@ -2488,7 +2428,7 @@ class VentanaPrincipalMensual(tk.Toplevel):
         frame_boton.config(background="white")
 
         # Crear un botón en el frame_boton
-        copiar_btn = tk.Button(frame_boton, text="Copiar", command=self.copiar_tabla_al_portapapeles_percentil,background="white")
+        copiar_btn = tk.Button(frame_boton, text="Copiar", command=lambda: copiar_treeview_al_portapapeles(self.tabla_percentiles),background="white")
         copiar_btn.pack(side="left")
         
         # Crear un Frame para la tabla (Treeview)
@@ -2512,25 +2452,6 @@ class VentanaPrincipalMensual(tk.Toplevel):
         # Empaquetar el Treeview
         self.tabla_percentiles.pack(fill="both", expand=True)
                  
-    def copiar_tabla_al_portapapeles_percentil(self):
-        # Extraer los encabezados de las columnas
-        headers = [self.tabla_percentiles.heading(col)["text"] for col in self.tabla_percentiles["columns"]]
-        table_data = ["\t".join(headers)]  # Crear la primera fila con los encabezados
-
-        # Extraer los datos de las filas
-        for row in self.tabla_percentiles.get_children():
-            values = self.tabla_percentiles.item(row)["values"]
-            table_data.append("\t".join(map(str, values)))
-
-        # Unir todas las filas con saltos de línea
-        table_str = "\n".join(table_data)
-
-        # Copiar al portapapeles
-        try:
-            pyperclip.copy(table_str)
-        except Exception as e:
-            tk.messagebox.showerror("Error", f"No se pudo copiar al portapapeles: {e}")
-    
     def crear_checkboxes(self):
             frame_checkboxes = tk.Frame(self)
             frame_checkboxes.pack(fill="both", expand=True)
@@ -2603,59 +2524,25 @@ class VentanaPrincipalMensual(tk.Toplevel):
         df_config_filtrado = self.df_config[self.df_config['ID'].isin(acumulado_isoyetas.columns)]
         return df_config_filtrado
     
-    def guardar_graficas(self):       
-        
-        # Aquí puedes llamar a la función que procesa los pluviómetros seleccionados
-        # por ejemplo: guardar las graficas y esas manos
-        #lluvia_filtrada_inst = self.df_instantaneos[self.seleccionados]
+    def guardar_graficas(self):
         lluvia_filtrada_barras = self.filtrar_pluvios_seleccionados(self.df_acumulados_diarios_mes_real)
-        
+
         if lluvia_filtrada_barras.empty:
             messagebox.showwarning("Advertencia", "Seleccione al menos un pluviómetro.")
             return
-        
-        # Cuadro de diálogo para seleccionar directorio y nombre del archivo
-        directorio = filedialog.askdirectory(title="Selecciona un directorio para guardar las gráficas")
-        errores = []
 
-        # Gráfica de barras
-        try:
-            fig_barras = graficar_acumulados_barras(lluvia_filtrada_barras)
-            fig_barras.savefig(f"{directorio}/grafica acumulado mensual.png", dpi=300)
-        except Exception as e:
-            errores.append(f"Gráfica de acumulado mensual: {e}")
+        guardar_figuras(self, [
+            ("grafica acumulado mensual.png",
+             lambda: graficar_acumulados_barras(lluvia_filtrada_barras)),
+            ("grafica acumulado diario.png",
+             lambda: graficar_acumulados_diarios(self.seleccionar_pluv_sin_INUMET(self.df_acumulados_diarios_mes_real))),
+            ("grafica acumulado respecto INUMET.png",
+             lambda: grafica_lluvias_respecto_inumet(self.df_acumulados_diarios_mes_real)),
+            ("grafica mensual isoyetas.png",
+             lambda: graficar_isoyetas(self.nombres_config_isoyetas(),
+                                       self.seleccionar_pluv_sin_INUMET(self.df_acumulados_diarios_total_mes_real))),
+        ], dpi=300)
 
-        # Gráfica de acumulado diario
-        try:
-            lluvia_filtrada_acum_diario = self.seleccionar_pluv_sin_INUMET(self.df_acumulados_diarios_mes_real)
-            fig_acum = graficar_acumulados_diarios(lluvia_filtrada_acum_diario)
-            fig_acum.savefig(f"{directorio}/grafica acumulado diario.png", dpi=300)
-        except Exception as e:
-            errores.append(f"Gráfica de acumulado diario: {e}")
-        
-        # Gráfica respecto INUMET
-        try:
-            fig_inumet = grafica_lluvias_respecto_inumet(self.df_acumulados_diarios_mes_real)
-            fig_inumet.savefig(f"{directorio}/grafica acumulado respecto INUMET.png", dpi=300)
-        except Exception as e:
-            errores.append(f"Gráfica respecto INUMET: {e}")
-        
-        # Gráfica de isoyetas
-        try:
-            fig_isoyetas = graficar_isoyetas(
-                self.nombres_config_isoyetas(),
-                self.seleccionar_pluv_sin_INUMET(self.df_acumulados_diarios_total_mes_real)
-            )
-            fig_isoyetas.savefig(f"{directorio}/grafica mensual isoyetas.png", dpi=300)
-        except Exception as e:
-            errores.append(f"Gráfica de isoyetas: {e}")
-        
-        if errores:
-            mensaje_error = "Algunas gráficas no se pudieron generar:\n\n" + "\n".join(errores)
-            messagebox.showwarning("Finalizado con errores", mensaje_error)
-        else:
-            messagebox.showinfo("Éxito", "Todas las gráficas fueron generadas correctamente.")
-  
     def regresar_inicio(self):
         self.cerrar_ventana()
         self.ventana_principal.reiniciar_variables()
@@ -2664,3 +2551,288 @@ class VentanaPrincipalMensual(tk.Toplevel):
     def cerrar_ventana(self):
         self.destroy()
     
+
+
+class VentanaExportar(tk.Toplevel):
+    """
+    Ventana de control y exportacion de los CSV refinados.
+
+    Antes de escribir nada a disco le muestra al operario como quedaron los datos, para que
+    pueda descartar de un vistazo que haya un pluviometro tapado, desfasado o recontando
+    lluvia. Recien despues se exportan los dos CSV.
+    """
+
+    # Color de fondo de las filas de la tabla de control segun su estado.
+    COLORES_ESTADO = {
+        'OK': '#e8f5e9',
+        'BAJO - revisar': '#fff4e0',
+        'ALTO - revisar': '#fff4e0',
+        'CON DESCARTES - revisar': '#fff4e0',
+        'DESFASADO - revisar': '#ffe0e0',
+        'SIN DATOS': '#eeeeee',
+    }
+
+    def __init__(self, ventana_principal):
+        super().__init__(ventana_principal)
+        self.ventana_principal = ventana_principal
+
+        self.title("Exportación de datos refinados")
+        self.state('zoomed')
+        self.config(background="white")
+        aplicar_icono(self)
+
+        self.protocol("WM_DELETE_WINDOW", self.ventana_principal.cerrar_todo)
+
+        self.figura_del_dia = None
+        self.selector_dia = None
+        self.pestanas_dibujadas = set()
+
+        self.calcular_datos()
+
+        self.crear_interfaz()
+
+    def calcular_datos(self):
+        """
+        Calcula las dos tablas refinadas y el resumen de control.
+
+        Se lee el archivo original y no ventana_principal.df_datos porque el calculo necesita
+        todas las lecturas crudas, que leer_archivo_principal() colapsa al redondear a 5 minutos.
+        """
+        self.config(cursor="watch")
+        self.update()
+
+        try:
+            self.df_5min, self.df_diario, self.df_descartes = calcular_tablas_refinadas(
+                self.ventana_principal.archivo_seleccionado)
+            self.df_resumen = resumen_control(self.df_5min, self.df_diario, self.df_descartes)
+        finally:
+            self.config(cursor="")
+
+    def crear_interfaz(self):
+        self.crear_encabezado()
+        self.crear_pestanas()
+        self.crear_botonera()
+
+    def crear_encabezado(self):
+        """Muestra el periodo que abarcan los datos y cuantos equipos quedaron marcados."""
+        encabezado = tk.Frame(self, background="white")
+        encabezado.pack(side="top", fill="x", padx=20, pady=(15, 5))
+
+        inicio = self.df_5min.index.min().strftime('%d-%m-%Y %H:%M')
+        fin = (self.df_5min.index.max() + pd.Timedelta(FRECUENCIA)).strftime('%d-%m-%Y %H:%M')
+
+        tk.Label(encabezado, text=f"Período procesado: {inicio}  a  {fin}   (días de 07:00 a 07:00)",
+                 font=("Arial", 13, "bold"), background="white").pack(anchor="w")
+
+        a_revisar = int((self.df_resumen['Estado'] != 'OK').sum())
+        texto = ("Todos los pluviómetros dieron valores coherentes entre sí."
+                 if a_revisar == 0 else
+                 f"{a_revisar} de {len(self.df_resumen)} pluviómetros quedaron marcados para revisar.")
+
+        tk.Label(encabezado, text=texto, font=("Arial", 11),
+                 foreground=("green" if a_revisar == 0 else "#b00000"),
+                 background="white").pack(anchor="w")
+
+        if not self.df_descartes.empty:
+            quitados = self.df_descartes['Valor descartado (mm)'].sum()
+            tk.Label(encabezado, background="white", font=("Arial", 11), foreground="#b00000",
+                     text=(f"Se descartaron {len(self.df_descartes)} rangos de 5 min por superar "
+                           f"{UMBRAL_OUTLIER_5MIN} mm ({quitados:.2f} mm en total). "
+                           f"El detalle está al pie de la pestaña.")).pack(anchor="w")
+
+    def crear_pestanas(self):
+        """Arma el cuaderno de pestañas. Cada gráfica se dibuja recién al abrirla."""
+        self.pestanas = ttk.Notebook(self)
+        self.pestanas.pack(side="top", fill="both", expand=True, padx=20, pady=10)
+
+        self.pestana_control = tk.Frame(self.pestanas, background="white")
+        self.pestana_totales = tk.Frame(self.pestanas, background="white")
+        self.pestana_diario = tk.Frame(self.pestanas, background="white")
+        self.pestana_dia = tk.Frame(self.pestanas, background="white")
+
+        self.pestanas.add(self.pestana_control, text="  Control de datos  ")
+        self.pestanas.add(self.pestana_totales, text="  Total del mes  ")
+        self.pestanas.add(self.pestana_diario, text="  Acumulado diario  ")
+        self.pestanas.add(self.pestana_dia, text="  Detalle por día  ")
+
+        self.crear_pestana_control()
+
+        self.pestanas.bind("<<NotebookTabChanged>>", self.dibujar_pestana_activa)
+
+    def crear_pestana_control(self):
+        """Tabla con una fila por pluviometro y su estado, coloreada segun el diagnostico."""
+        tk.Label(self.pestana_control, text="Revisión de los datos procesados:",
+                 font=("Arial", 12, "bold"), background="white").pack(anchor="w", padx=10, pady=10)
+
+        frame_tabla = tk.Frame(self.pestana_control, background="white")
+        frame_tabla.pack(fill="both", expand=True, padx=10)
+
+        tabla = ttk.Treeview(frame_tabla, show="headings", height=len(self.df_resumen))
+
+        llenar_treeview(tabla, self.df_resumen, ancho_columna=110,
+                        tags=list(self.df_resumen['Estado']))
+
+        for estado, color in self.COLORES_ESTADO.items():
+            tabla.tag_configure(estado, background=color)
+
+        tabla.column('Pluviometro', width=170, anchor="w")
+        tabla.pack(fill="both", expand=True)
+
+        self.tabla_control = tabla
+
+        frame_pie = tk.Frame(self.pestana_control, background="white")
+        frame_pie.pack(fill="x", padx=10, pady=10)
+
+        tk.Button(frame_pie, text="Copiar tabla",
+                  command=lambda: copiar_treeview_al_portapapeles(self.tabla_control),
+                  font=("Arial", 10, "bold"), background="white").pack(side="left")
+
+        tk.Label(frame_pie, background="white", justify="left", font=("Arial", 9),
+                 text=("BAJO: midió mucho menos que el resto de la red (equipo tapado o sin bascular).      "
+                       "ALTO: midió mucho más que el resto.\n"
+                       "DESFASADO: midió en días distintos al resto de la red (reloj corrido o reinicios "
+                       "que le hacen recontar la lluvia).      "
+                       f"CON DESCARTES: tuvo rangos de más de {UMBRAL_OUTLIER_5MIN} mm en 5 min.")
+                 ).pack(side="left", padx=20)
+
+        self.mostrar_descartes()
+
+    def mostrar_descartes(self):
+        """Lista los rangos que se descartaron por outlier, para que no se pierdan de vista."""
+        if self.df_descartes.empty:
+            return
+
+        tk.Label(self.pestana_control, background="white", font=("Arial", 11, "bold"),
+                 text=(f"Rangos descartados por superar {UMBRAL_OUTLIER_5MIN} mm en 5 minutos "
+                       f"(no se cuentan en el acumulado):")).pack(anchor="w", padx=10, pady=(10, 5))
+
+        tabla = ttk.Treeview(self.pestana_control, show="headings", height=min(len(self.df_descartes), 5))
+
+        listado = self.df_descartes.copy()
+        listado['Fecha y hora'] = listado['Fecha y hora'].dt.strftime('%d-%m-%Y %H:%M')
+
+        llenar_treeview(tabla, listado, ancho_columna=160)
+        tabla.pack(fill="x", padx=10, pady=(0, 10))
+
+    def dibujar_pestana_activa(self, event=None):
+        """Dibuja la gráfica de la pestaña recién abierta, una sola vez."""
+        actual = self.pestanas.select()
+
+        if actual in self.pestanas_dibujadas:
+            return
+
+        self.pestanas_dibujadas.add(actual)
+        self.config(cursor="watch")
+        self.update()
+
+        try:
+            if actual == str(self.pestana_totales):
+                self.mostrar_figura(self.pestana_totales, graficar_totales_mes(self.df_resumen))
+            elif actual == str(self.pestana_diario):
+                self.mostrar_figura(self.pestana_diario, graficar_diario_por_pluviometro(self.df_diario))
+            elif actual == str(self.pestana_dia):
+                self.crear_pestana_dia()
+        except Exception as error:
+            messagebox.showerror("Error", f"No se pudo generar la gráfica:\n\n{error}")
+        finally:
+            self.config(cursor="")
+
+    def crear_pestana_dia(self):
+        """Selector de día pluviométrico más la gráfica de detalle de ese día."""
+        frame_selector = tk.Frame(self.pestana_dia, background="white")
+        frame_selector.pack(side="top", fill="x", padx=10, pady=10)
+
+        tk.Label(frame_selector, text="Día pluviométrico:", font=("Arial", 11, "bold"),
+                 background="white").pack(side="left")
+
+        dias = [dia.strftime('%d-%m-%Y') for dia in self.df_diario.index]
+
+        self.selector_dia = ttk.Combobox(frame_selector, values=dias, width=14, state="readonly")
+        self.selector_dia.pack(side="left", padx=10)
+
+        # Arranca en el dia mas lluvioso, que es el que conviene mirar primero.
+        self.selector_dia.set(self.df_diario.sum(axis=1).idxmax().strftime('%d-%m-%Y'))
+
+        self.selector_dia.bind("<<ComboboxSelected>>", lambda evento: self.actualizar_grafica_dia())
+
+        self.frame_grafica_dia = tk.Frame(self.pestana_dia, background="white")
+        self.frame_grafica_dia.pack(side="top", fill="both", expand=True)
+
+        self.actualizar_grafica_dia()
+
+    def actualizar_grafica_dia(self):
+        """Redibuja el detalle del día elegido, descartando la figura anterior."""
+        if self.figura_del_dia is not None:
+            plt.close(self.figura_del_dia)
+
+        self.figura_del_dia = graficar_intensidad_dia(self.df_5min, self.dia_seleccionado())
+
+        self.mostrar_figura(self.frame_grafica_dia, self.figura_del_dia)
+
+    def dia_seleccionado(self):
+        """Dia pluviometrico elegido en el selector, o el mas lluvioso si todavia no se abrio."""
+        if self.selector_dia is None:
+            return self.df_diario.sum(axis=1).idxmax()
+
+        return pd.to_datetime(self.selector_dia.get(), format='%d-%m-%Y')
+
+    def mostrar_figura(self, contenedor, figura):
+        """Dibuja una figura de matplotlib dentro de un frame, reemplazando lo que hubiera."""
+        for widget in contenedor.winfo_children():
+            widget.destroy()
+
+        canvas = FigureCanvasTkAgg(figura, master=contenedor)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.draw()
+
+    def crear_botonera(self):
+        botonera = tk.Frame(self, background="white")
+        botonera.pack(side="bottom", fill="x", padx=20, pady=15)
+
+        tk.Button(botonera, text="Reiniciar", command=self.regresar_inicio,
+                  font=("Arial", 10, "bold"), background="white").pack(side="left", padx=10)
+
+        tk.Button(botonera, text="Guardar Graficas", command=self.guardar_graficas,
+                  font=("Arial", 10, "bold"), background="white").pack(side="left", padx=10)
+
+        tk.Button(botonera, text="Exportar CSV", command=self.exportar,
+                  font=("Arial", 11, "bold"), background="white").pack(side="right", padx=10)
+
+    def exportar(self):
+        """Escribe los dos CSV refinados en la carpeta que elija el operario."""
+        carpeta = filedialog.askdirectory(title="Seleccionar carpeta donde guardar los CSV")
+        self.lift()
+
+        if not carpeta:
+            return
+
+        try:
+            ruta_5min, ruta_diario = escribir_csvs(self.df_5min, self.df_diario, carpeta)
+        except Exception as error:
+            messagebox.showerror("Error", f"No se pudieron generar los CSV.\n\n{error}")
+            return
+
+        messagebox.showinfo("Éxito",
+                            "Archivos generados correctamente:\n\n"
+                            f"- {os.path.basename(ruta_5min)}\n"
+                            f"- {os.path.basename(ruta_diario)}\n\n"
+                            f"En: {carpeta}")
+        self.lift()
+
+    def guardar_graficas(self):
+        dia = self.dia_seleccionado()
+
+        guardar_figuras(self, [
+            ("grafica total del mes.png", lambda: graficar_totales_mes(self.df_resumen)),
+            ("grafica acumulado diario.png", lambda: graficar_diario_por_pluviometro(self.df_diario)),
+            (f"grafica detalle {dia.strftime('%d-%m-%Y')}.png",
+             lambda: graficar_intensidad_dia(self.df_5min, dia)),
+        ], dpi=300)
+
+    def regresar_inicio(self):
+        self.cerrar_ventana()
+        self.ventana_principal.reiniciar_variables()
+        self.ventana_principal.deiconify()
+
+    def cerrar_ventana(self):
+        self.destroy()
