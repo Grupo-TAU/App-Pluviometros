@@ -11,6 +11,64 @@ figuras en PNG y el borrador en Word.
 
 ---
 
+## Configurar las carpetas de trabajo
+
+Las rutas se fijan una sola vez en `config_informe.json`:
+
+```json
+{
+  "crudos": "data/raw",
+  "inumet": "data/inumet",
+  "salida": "G:/Unidades compartidas/GRUPO TAU/.../Informes"
+}
+```
+
+Las rutas relativas se resuelven contra la carpeta del pipeline, así que el comando funciona
+igual desde cualquier directorio. Las absolutas se usan tal cual, que es lo práctico para
+apuntar al drive compartido.
+
+Para una corrida puntual se puede pisar cualquiera sin tocar el archivo:
+
+```bash
+python generar_informe.py --mes 8 --anio 2026 --salida "D:/pruebas"
+```
+
+Si `config_informe.json` no existe, se usan los valores por defecto de arriba.
+
+⚠️ El archivo de descartes (`problemas_{mes}.csv`) vive dentro de la carpeta de salida. Si
+cambiás `salida`, la corrida siguiente vuelve a proponer los candidatos automáticos y hay que
+rehacer las correcciones.
+
+---
+
+## Instalación en otra máquina
+
+```bash
+pip install -r requirements.txt
+```
+
+Hace falta Python 3.10 o superior. `tkinter` viene con Python en Windows; si el equipo usa
+Linux hay que instalarlo aparte (`python3-tk`).
+
+Además de `generar_informe.py`, hay que copiar:
+
+| Qué | Por qué |
+|---|---|
+| `Codigo/Informe/` (5 archivos) | El pipeline |
+| `Codigo/Instalador/Funciones_basicas.py` | Lectura de CSV, fechas, conversión UTM |
+| `Codigo/Instalador/Funciones_exportar.py` | Los dos CSV refinados |
+| `Codigo/Instalador/Funciones_mensual.py` | Cuartiles históricos |
+| `Codigo/Instalador/isoyetas.py` | Interpolación IDW |
+| `Equipos_RHM.csv` | Tabla 1-1 |
+| `Coordenadas_Equipos.csv` | Posiciones para las isoyetas |
+| `MONTEVIDEO.png` | Mapa de fondo |
+| `config_informe.json` | Opcional |
+
+No hacen falta `main.py`, `interfaz.py`, `Funciones_tormenta.py` ni `Funciones_config.py`: son
+solo de la app con interfaz gráfica. Lo más simple es clonar el repo entero.
+
+---
+
 ## Rutina mes a mes
 
 ### 1. Exportar el CSV crudo de Grafana
@@ -106,6 +164,20 @@ reinicia solo, a medianoche. La lluvia de cada rango de 5 minutos es la suma de 
 entre lecturas crudas consecutivas dentro del rango, descartando las negativas (que son
 reinicios del contador). En lluvia intensa hay varias lecturas por rango y se suman todas. La
 cadena se reinicia en cada día pluviométrico, así que el primer rango de cada día vale 0.
+
+**Un solo camino de cálculo.** La app, la exportación de CSV y el informe entran todos por
+`calcular_tablas_refinadas()` en `Funciones_exportar.py`. No hay una cuenta para la pantalla y
+otra para el informe: sobre el mismo archivo crudo los tres dan exactamente los mismos números.
+La app lee el archivo dos veces a propósito — el contador en grilla de 5 minutos sirve para los
+controles de estructura (equipos sin datos, porcentaje de nulos, saltos temporales) y no se usa
+nunca para calcular lluvia.
+
+**Volver al día civil.** El corte de las 07:00 sale de una sola constante, `HORA_CORTE` en
+`Funciones_exportar.py`. Ponerla en `0` pasa todo el cálculo al día civil (00:00 a 00:00) sin
+tocar nada más: la ventana del mes, el reinicio de las diferencias y la etiqueta de cada día se
+derivan de ella. Es un cambio de una línea, y cambia los números — con el corte a las 07:00 el
+mes arranca a las 07:00 del último día del mes anterior, y con el día civil arranca el día 1 a
+las 00:00, así que el export de Grafana tiene que cubrir el rango que corresponda.
 
 **Outliers (4.4).** Se descartan los rangos que superan 25 mm en 5 minutos, y se reportan los
 que superan 50 mm en 10 minutos. Un rango descartado queda en blanco, no en cero: no se sabe

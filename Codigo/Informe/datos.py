@@ -13,8 +13,7 @@ import pandas as pd
 
 from Codigo.Instalador.Funciones_basicas import eliminar_tildes
 from Codigo.Instalador.Funciones_exportar import (
-    FRECUENCIA, HORA_CORTE, calcular_acumulados_5min, calcular_acumulados_diarios_corte,
-    descartar_outliers, dia_pluviometrico, leer_datos_crudos)
+    FRECUENCIA, HORA_CORTE, dia_pluviometrico, leer_datos_crudos, refinar_crudo)
 
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
          "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -206,8 +205,7 @@ def cargar_mes(archivo_crudo, anio, mes, carpeta_base='.', carpeta_inumet=None):
     """
     df_crudo = leer_datos_crudos(archivo_crudo)
 
-    df_5min, df_descartes = descartar_outliers(calcular_acumulados_5min(df_crudo))
-    df_diario = calcular_acumulados_diarios_corte(df_5min)
+    df_5min, df_diario, df_descartes = refinar_crudo(df_crudo)
 
     detectado = df_diario.index[0]
     if (detectado.year, detectado.month) != (anio, mes):

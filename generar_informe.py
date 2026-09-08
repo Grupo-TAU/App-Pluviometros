@@ -10,6 +10,7 @@ Deja en outputs/{anio}-{mes}/ los dos CSV refinados, las tablas del informe en C
 figuras en PNG y el borrador del informe en Word.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -24,13 +25,43 @@ from Codigo.Instalador.Funciones_basicas import eliminar_tildes
 from Codigo.Instalador.Funciones_exportar import (dia_pluviometrico, escribir_csvs,
                                                   leer_datos_crudos, limpiar_caidas_espurias)
 
-CARPETA_CRUDOS = 'data/raw'
-CARPETA_INUMET = 'data/inumet'
-CARPETA_SALIDA = 'outputs'
+# Carpeta donde vive el pipeline, para poder correrlo desde cualquier directorio.
+CARPETA_BASE = os.path.dirname(os.path.abspath(__file__))
+
+ARCHIVO_CONFIG = os.path.join(CARPETA_BASE, 'config_informe.json')
+
+RUTAS_POR_DEFECTO = {
+    'crudos': 'data/raw',
+    'inumet': 'data/inumet',
+    'salida': 'outputs',
+}
 
 
-def ruta_crudo_por_defecto(anio, mes):
-    return os.path.join(CARPETA_CRUDOS, f'{anio}-{mes:02d}.csv')
+def cargar_config():
+    """
+    Lee las rutas de trabajo de config_informe.json.
+
+    Sirve para dejar fijas de una vez las carpetas del equipo (por ejemplo las del drive
+    compartido) y no tener que escribirlas en cada corrida. Lo que falte en el archivo toma el
+    valor por defecto, y las opciones de linea de comandos siempre mandan por encima.
+
+    Retorna:
+    - Diccionario con las claves 'crudos', 'inumet' y 'salida'.
+    """
+    rutas = dict(RUTAS_POR_DEFECTO)
+
+    if os.path.exists(ARCHIVO_CONFIG):
+        with open(ARCHIVO_CONFIG, encoding='utf-8') as archivo:
+            rutas.update({k: v for k, v in json.load(archivo).items() if k in rutas and v})
+
+    # Las rutas relativas se resuelven contra la carpeta del pipeline, no contra el directorio
+    # desde el que se ejecuta, para que el comando funcione igual desde cualquier lado.
+    return {clave: valor if os.path.isabs(valor) else os.path.join(CARPETA_BASE, valor)
+            for clave, valor in rutas.items()}
+
+
+def ruta_crudo_por_defecto(carpeta_crudos, anio, mes):
+    return os.path.join(carpeta_crudos, f'{anio}-{mes:02d}.csv')
 
 
 def validar_contra_crudo(datos):
@@ -131,25 +162,32 @@ def main():
     parser.add_argument('--mes', type=int, required=True, help='Numero de mes (1-12)')
     parser.add_argument('--anio', type=int, required=True, help='Anio del informe')
     parser.add_argument('--version', type=int, default=1, help='Version del informe (default 1)')
-    parser.add_argument('--crudo', help=f'CSV crudo. Por defecto {CARPETA_CRUDOS}/{{anio}}-{{mes}}.csv')
-    parser.add_argument('--inumet', default=CARPETA_INUMET, help='Carpeta con los CSV de INUMET')
-    parser.add_argument('--salida', default=CARPETA_SALIDA, help='Carpeta raiz de salida')
+    parser.add_argument('--crudo', help='CSV crudo. Por defecto <crudos>/{anio}-{mes}.csv')
+    parser.add_argument('--inumet', help='Carpeta con los CSV de INUMET')
+    parser.add_argument('--salida', help='Carpeta raiz de salida')
     parser.add_argument('--dry-run', action='store_true',
                         help='Solo valida los calculos contra el CSV crudo, no escribe el informe')
     args = parser.parse_args()
 
-    archivo = args.crudo or ruta_crudo_por_defecto(args.anio, args.mes)
+    rutas = cargar_config()
+    carpeta_inumet = args.inumet or rutas['inumet']
+    carpeta_salida = args.salida or rutas['salida']
+
+    archivo = args.crudo or ruta_crudo_por_defecto(rutas['crudos'], args.anio, args.mes)
     if not os.path.exists(archivo):
         sys.exit(f"No se encuentra el CSV crudo: {archivo}\n"
-                 f"Pasalo con --crudo o dejalo en {CARPETA_CRUDOS}/{args.anio}-{args.mes:02d}.csv")
+                 f"Pasalo con --crudo, o dejalo en esa ruta, o cambia la carpeta 'crudos' en "
+                 f"{os.path.basename(ARCHIVO_CONFIG)}")
 
-    carpeta = os.path.join(args.salida, f'{args.anio}-{args.mes:02d}')
+    carpeta = os.path.join(carpeta_salida, f'{args.anio}-{args.mes:02d}')
     os.makedirs(carpeta, exist_ok=True)
 
     print(f"\nInforme pluviometrico de {nombre_mes(args.mes)} {args.anio} (V{args.version})")
-    print(f"  crudo: {archivo}")
+    print(f"  crudo:  {archivo}")
+    print(f"  salida: {carpeta}")
 
-    datos = cargar_mes(archivo, args.anio, args.mes, carpeta_inumet=args.inumet)
+    datos = cargar_mes(archivo, args.anio, args.mes,
+                       carpeta_base=CARPETA_BASE, carpeta_inumet=carpeta_inumet)
     print(f"  exportado de Grafana el {datos.exportado}")
     print(f"  {datos.df_diario.shape[1]} equipos, {len(datos.df_diario)} dias, "
           f"{len(datos.df_5min)} rangos de 5 min")
@@ -168,7 +206,7 @@ def main():
         return 0 if peor < 0.05 else 1
 
     if datos.inumet is None:
-        print(f"\n  AVISO: falta completar {ruta_plantilla_inumet(args.inumet, args.anio, args.mes)}")
+        print(f"\n  AVISO: falta completar {ruta_plantilla_inumet(carpeta_inumet, args.anio, args.mes)}")
         print("         El informe se genera igual, con las partes de INUMET marcadas.")
 
     # ---------------------------------------------------------------- CSV refinados
@@ -204,14 +242,14 @@ def main():
     # ---------------------------------------------------------------- figuras
     print("\nFiguras:")
     rutas = {
-        'mapa_red': guardar_figura(figuras.mapa_de_la_red(datos, '.'), carpeta, 'fig_1-1_red'),
+        'mapa_red': guardar_figura(figuras.mapa_de_la_red(datos, CARPETA_BASE), carpeta, 'fig_1-1_red'),
         'qq': guardar_figura(figuras.qq_contra_inumet(datos, descartados), carpeta,
                              'fig_4-1_qq_inumet'),
         'acumulado_mensual': guardar_figura(figuras.acumulado_mensual(datos, acumulados),
                                             carpeta, 'fig_6-1_acumulado_mensual'),
         'serie_diaria': guardar_figura(figuras.serie_diaria(datos, descartados), carpeta,
                                        'fig_6-2_serie_diaria'),
-        'isoyetas_mes': guardar_figura(figuras.isoyetas_mensuales(datos, acumulados, '.'),
+        'isoyetas_mes': guardar_figura(figuras.isoyetas_mensuales(datos, acumulados, CARPETA_BASE),
                                        carpeta, 'fig_6-3_isoyetas_mes'),
     }
 
@@ -228,7 +266,7 @@ def main():
         rutas[f'acumulada_{numero}'] = guardar_figura(
             figuras.acumulada_del_evento(evento), carpeta, f'fig_6-5_acumulada_evento{numero}')
         rutas[f'isoyetas_evento_{numero}'] = guardar_figura(
-            figuras.isoyetas_del_evento(datos, evento, '.'), carpeta,
+            figuras.isoyetas_del_evento(datos, evento, CARPETA_BASE), carpeta,
             f'fig_6-6_isoyetas_evento{numero}')
         rutas[f'tr_{numero}'] = guardar_figura(
             figuras.intensidad_vs_tr(maximos), carpeta, f'fig_6-7_tr_evento{numero}')

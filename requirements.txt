@@ -1,0 +1,8 @@
+# Dependencias del pipeline del informe pluviometrico (generar_informe.py).
+# Instalar con:  pip install -r requirements.txt
+pandas
+numpy
+matplotlib
+python-docx
+pillow
+pyperclip

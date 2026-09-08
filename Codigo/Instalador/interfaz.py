@@ -438,9 +438,7 @@ class Config(tk.Toplevel):
         Dependiendo de la selección ("Tormenta" o "Mensual"), carga la ventana correspondiente.
         """
         self.ventana_principal.df_datos_original = self.ventana_principal.df_datos
-        df_instantaneo = calcular_instantaneos(self.df_datos)
-        self.df_acumulados_diarios = calcular_acumulados_diarios(df_instantaneo)
-        self.ventana_principal.df_acumulados_diarios = self.df_acumulados_diarios
+        self.ventana_principal.calcular_series_lluvia()
         if self.ventana_principal.analisis_seleccionado.get()== "Tormenta":
             return VentanaLimiteTemporal(self.ventana_principal)
         
@@ -635,7 +633,11 @@ class VentanaInicio(tk.Tk):
         
         self.valor_acumulado_inumet_tormenta = None
         
-        self.df_acumulados_diarios = None
+        # Series de lluvia, todas calculadas por el camino comun de Funciones_exportar.
+        self.df_5min = None
+        self.df_5min_original = None
+        self.df_diario = None
+        self.df_descartes = None
         
         # Lista de variables de retorno de período de retorno (TR)
         self.lista_tr = [tk.IntVar(value=v) for v in [1, 1, 1, 1, 0, 1, 0]]
@@ -903,6 +905,39 @@ class VentanaInicio(tk.Tk):
         self.habilitar_boton_validador
         self.habilitar_boton_comenzar()
 
+    def calcular_series_lluvia(self):
+        """
+        Calcula la lluvia del archivo seleccionado por el camino de calculo comun.
+
+        Se relee el archivo original en vez de derivar de self.df_datos porque el calculo
+        necesita todas las lecturas crudas, que leer_archivo_principal() colapsa al redondear
+        a 5 minutos.
+
+        El analisis mensual acota al mes detectado; el de tormenta procesa el archivo entero,
+        porque ahi el recorte temporal lo elige despues el operario.
+        """
+        mensual = self.analisis_seleccionado.get() == "Mensual"
+
+        _, df_5min, df_diario, self.df_descartes = preparar_series(
+            self.archivo_seleccionado, mensual)
+
+        # agregar_equipos_nuevos_config() le saca las tildes a las columnas de self.df_datos.
+        # Las series de lluvia se leen aparte del archivo crudo, que las trae con tilde, asi
+        # que hay que sacarselas igual antes de poder cruzarlas con la configuracion.
+        df_5min.columns = [eliminar_tildes(col) for col in df_5min.columns]
+        df_diario.columns = [eliminar_tildes(col) for col in df_diario.columns]
+
+        # Si self.df_datos ya viene renombrado a los ID de la configuracion, las series de
+        # lluvia tienen que seguirlo, para que los checkboxes y los filtros de pluviometros
+        # valgan para todas por igual.
+        if not df_5min.columns.equals(self.df_datos.columns):
+            df_5min = actualizar_columnas_datos_config(self.df_config, df_5min)
+            df_diario = actualizar_columnas_datos_config(self.df_config, df_diario)
+
+        self.df_5min = df_5min
+        self.df_5min_original = df_5min
+        self.df_diario = df_diario
+
     def iniciar_ventanas(self):
         """
         Inicia la siguiente ventana dependiendo del análisis seleccionado.
@@ -928,8 +963,7 @@ class VentanaInicio(tk.Tk):
             self.df_datos = actualizar_columnas_datos_config(self.df_config, self.df_datos)
             self.df_datos_original = self.df_datos
             
-            df_instantaneo = calcular_instantaneos(self.df_datos)
-            self.df_acumulados_diarios = calcular_acumulados_diarios(df_instantaneo)
+            self.calcular_series_lluvia()
             
             if self.analisis_seleccionado.get()== "Tormenta":
                 self.cerrar_ventana()
@@ -980,9 +1014,8 @@ class VentanaLimiteTemporal(tk.Toplevel):
         self.df_datos_original = self.ventana_principal.df_datos_original
         
         pluvio_validos, pluvio_no_validos = obtener_pluviometros_validos(self.df_datos)
-        df_lluvia_instantanea = calcular_instantaneos(self.df_datos_original)
 
-        self.lluvia_filtrada = df_lluvia_instantanea[pluvio_validos]
+        self.lluvia_filtrada = self.ventana_principal.df_5min_original[pluvio_validos]
         
         self.title("Ventana limite temporal")
         self.state('zoomed')
@@ -1148,6 +1181,7 @@ class VentanaLimiteTemporal(tk.Toplevel):
         if self.validar_datos():
             limite_inferior, limite_superior = self.obtener_fecha_hora()
             self.ventana_principal.df_datos = limitar_df_temporal(self.ventana_principal.df_datos_original, limite_inferior, limite_superior)
+            self.ventana_principal.df_5min = limitar_df_temporal(self.ventana_principal.df_5min_original, limite_inferior, limite_superior)
             self.proxima_ventana_tormenta()
 
     def regresar_inicio(self):
@@ -1716,10 +1750,10 @@ class VentanaPrincipalTormenta(tk.Toplevel):
         self.df_config = self.ventana_principal.df_config
         self.df_datos = self.ventana_principal.df_datos
         self.pluvio_validos, self.pluvio_no_validos = obtener_pluviometros_validos(self.df_datos)
-        self.df_acumulados = acumulados(self.df_datos)
-        self.df_instantaneos = calcular_instantaneos(self.df_datos)
+        self.df_instantaneos = self.ventana_principal.df_5min
+        self.df_acumulados = acumulados(self.df_instantaneos)
         
-        self.df_acumulados_diarios = calcular_acumulados_diarios(self.df_instantaneos)
+        self.df_acumulados_diarios = calcular_acumulados_diarios_corte(self.df_instantaneos)
         self.df_acumulados_diarios_total = acumulado_diarios_total(self.df_acumulados_diarios).tail(1)
         
         self.df_saltos_maximos, self.df_saltos = detectar_saltos_temporales(self.df_datos[self.pluvio_validos], self.df_config)
@@ -2179,43 +2213,35 @@ class VentanaPrincipalMensual(tk.Toplevel):
         self.ventana_principal = ventana_principal
         
         df_datos_sin_cortar = self.ventana_principal.df_datos
-        self.df_instantaneo_sin_cortar = calcular_instantaneos(df_datos_sin_cortar) 
-        
-        self.mes = obtener_mes(df_datos_sin_cortar)  
-        
+
+        # La lluvia ya viene calculada y acotada al mes por calcular_tablas_refinadas(), con el
+        # corte de las 07:00 y cada dia etiquetado con su fecha real. Por eso desaparecio la
+        # distincion entre "mes INUMET" y "mes real": antes eran dos recortes distintos del
+        # mismo mes y podian dar totales que no cerraban entre si. Ahora son la misma tabla.
+        self.df_instantaneo_mes_real = self.ventana_principal.df_5min
+
+        self.mes = obtener_mes(self.ventana_principal.df_diario)
+
         self.df_acumulados_INUMET = self.ventana_principal.df_acumulados_INUMET
-              
-        # Datos mes INUMET
-        self.df_instantaneo_mes_inumet = cortar_datos_mes_inumet(self.mes, self.df_instantaneo_sin_cortar)
-        self.df_instantaneo_mes_inumet = cortar_datos_mes_real(self.mes, self.df_instantaneo_mes_inumet)
-        
-        self.df_acumulados_diarios_mes_inumet = calcular_acumulados_diarios(self.df_instantaneo_mes_inumet)
-        
-        self.df_acumulados_diarios_mes_inumet.index = pd.to_datetime(self.df_acumulados_diarios_mes_inumet.index).strftime('%Y-%m-%d')
-    
-        self.df_acumulados_diarios_mes_inumet = self.df_acumulados_diarios_mes_inumet.join(self.df_acumulados_INUMET, how='left')
-    
-        self.df_acumulados_diarios_mes_inumet.fillna(0, inplace=True)
+
+        self.df_acumulados_diarios_mes_real = self.ventana_principal.df_diario.copy()
+
+        self.df_acumulados_diarios_mes_real.index = pd.to_datetime(self.df_acumulados_diarios_mes_real.index).strftime('%Y-%m-%d')
+
+        self.df_acumulados_diarios_mes_real = self.df_acumulados_diarios_mes_real.join(self.df_acumulados_INUMET, how='left')
+
+        self.df_acumulados_diarios_mes_real.fillna(0, inplace=True)
+
+        self.df_acumulados_diarios_mes_inumet = self.df_acumulados_diarios_mes_real
 
         self.df_correlacion = tabla_correlacion(self.df_acumulados_diarios_mes_inumet)
 
-        # Datos mes Real
-        self.df_instantaneo_mes_real = cortar_datos_mes_real(self.mes, self.df_instantaneo_sin_cortar)
-            
         self.checkbox_inicio = self.ventana_principal.checkbox_inicio
         
         self.df_config = self.ventana_principal.df_config      
         
         self.pluvio_validos, self.pluvio_no_validos = obtener_pluviometros_validos(df_datos_sin_cortar)
         
-        self.df_acumulados_diarios_mes_real = calcular_acumulados_diarios(self.df_instantaneo_mes_real)
-        
-        self.df_acumulados_diarios_mes_real.index = pd.to_datetime(self.df_acumulados_diarios_mes_real.index).strftime('%Y-%m-%d')
-    
-        self.df_acumulados_diarios_mes_real = self.df_acumulados_diarios_mes_real.join(self.df_acumulados_INUMET, how='left')
-    
-        self.df_acumulados_diarios_mes_real.fillna(0, inplace=True)
-                
         self.df_acumulados_diarios_total_mes_real = acumulado_diarios_total(self.df_acumulados_diarios_mes_real).tail(1)
         
         

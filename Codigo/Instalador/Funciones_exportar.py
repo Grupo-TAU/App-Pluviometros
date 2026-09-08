@@ -1,7 +1,13 @@
 from Codigo.Instalador.Funciones_basicas import *
 
-# Hora de corte del dia pluviometrico: cada dia va de las 07:00 a las 07:00 del dia siguiente.
+# Hora de corte del dia de medicion: cada dia va de las 07:00 a las 07:00 del dia siguiente.
+# Poner HORA_CORTE = 0 vuelve al dia civil (00:00 a 00:00) sin tocar nada mas: la ventana del
+# mes, el reinicio de las diferencias y la etiqueta de cada dia se derivan todas de aca.
 HORA_CORTE = 7
+
+# Un dia que cierra a las 07:00 se etiqueta con su fecha de cierre, asi que abre el dia
+# anterior. El dia civil abre en su propia fecha y no lleva desplazamiento.
+DESPLAZAMIENTO_DIA = pd.Timedelta(days=1) if HORA_CORTE else pd.Timedelta(0)
 
 # Ancho de los rangos de la tabla de acumulados finos.
 FRECUENCIA = '5min'
@@ -73,28 +79,47 @@ def limpiar_caidas_espurias(serie):
 
 def dia_pluviometrico(fechas):
     """
-    Asigna cada instante a su dia pluviometrico [07:00, 07:00).
+    Asigna cada instante a su dia de medicion [HORA_CORTE, HORA_CORTE).
 
-    El dia se etiqueta con la fecha de cierre, que es la convencion de la medicion de las
-    07:00: lo que se acumula entre las 07:00 del 31/07 y las 07:00 del 01/08 es la lluvia
-    del 01/08. Asi un mes completo queda etiquetado con los dias reales de ese mes.
+    Con el corte a las 07:00 el dia se etiqueta con la fecha de cierre, que es la convencion
+    de la medicion de las 07:00: lo que se acumula entre las 07:00 del 31/07 y las 07:00 del
+    01/08 es la lluvia del 01/08. Con HORA_CORTE = 0 el dia es el civil y se etiqueta con su
+    propia fecha. En los dos casos un mes completo queda etiquetado con los dias reales de
+    ese mes.
 
     Parametros:
     - fechas: DatetimeIndex o Serie de fechas.
 
     Retorna:
-    - DatetimeIndex (sin hora) del dia pluviometrico al que pertenece cada instante.
+    - DatetimeIndex (sin hora) del dia de medicion al que pertenece cada instante.
     """
-    return (pd.DatetimeIndex(fechas) - pd.Timedelta(hours=HORA_CORTE)).normalize() + pd.Timedelta(days=1)
+    return ((pd.DatetimeIndex(fechas) - pd.Timedelta(hours=HORA_CORTE)).normalize()
+            + DESPLAZAMIENTO_DIA)
+
+
+def inicio_del_dia(dias):
+    """
+    Devuelve el instante en que abre cada dia de medicion: la inversa de dia_pluviometrico().
+
+    Parametros:
+    - dias: DatetimeIndex o lista de dias (sin hora).
+
+    Retorna:
+    - DatetimeIndex con el instante de apertura de cada uno.
+    """
+    return pd.DatetimeIndex(dias) - DESPLAZAMIENTO_DIA + pd.Timedelta(hours=HORA_CORTE)
 
 
 def ventana_del_mes(df_crudo):
     """
-    Calcula la ventana temporal del mes contenido en los datos: desde las 07:00 del ultimo
-    dia del mes anterior hasta las 07:00 del ultimo dia del mes (extremo final excluido).
+    Calcula la ventana temporal del mes contenido en los datos: desde que abre el primer dia
+    del mes hasta que abre el primero del mes siguiente (extremo final excluido).
+
+    Con el corte a las 07:00 eso va de las 07:00 del ultimo dia del mes anterior a las 07:00
+    del ultimo dia del mes; con HORA_CORTE = 0 es el mes civil completo.
 
     El mes se deduce del dato central del archivo, para no confundirse con las horas del
-    mes anterior que arrastra el propio corte de las 07:00.
+    mes anterior que arrastra el propio corte.
 
     Parametros:
     - df_crudo: DataFrame indexado por fecha/hora.
@@ -105,9 +130,31 @@ def ventana_del_mes(df_crudo):
     centro = df_crudo.index[len(df_crudo) // 2]
 
     primero_del_mes = pd.Timestamp(year=centro.year, month=centro.month, day=1)
+    primero_del_siguiente = primero_del_mes + pd.offsets.MonthBegin(1)
 
-    inicio = primero_del_mes - pd.Timedelta(days=1) + pd.Timedelta(hours=HORA_CORTE)
-    fin = (primero_del_mes + pd.offsets.MonthEnd(1)).normalize() + pd.Timedelta(hours=HORA_CORTE)
+    inicio, fin = inicio_del_dia([primero_del_mes, primero_del_siguiente])
+
+    return inicio, fin
+
+
+def ventana_del_archivo(df_crudo):
+    """
+    Calcula la ventana que cubre todas las lecturas del archivo, alineada a dias de medicion
+    completos.
+
+    La usa el analisis de tormenta, donde el recorte temporal lo elige el operario y no tiene
+    por que coincidir con un mes: ahi acotar al mes detectado borraria datos en silencio.
+
+    Parametros:
+    - df_crudo: DataFrame indexado por fecha/hora.
+
+    Retorna:
+    - Tupla (inicio, fin) de Timestamps.
+    """
+    dias = dia_pluviometrico([df_crudo.index.min(), df_crudo.index.max()])
+
+    inicio = inicio_del_dia(dias[:1])[0]
+    fin = inicio_del_dia(dias[1:] + pd.Timedelta(days=1))[0]
 
     return inicio, fin
 
@@ -442,21 +489,69 @@ def exportar_csvs(archivo, carpeta_destino):
     return escribir_csvs(df_5min, df_diario, carpeta_destino)
 
 
-def calcular_tablas_refinadas(archivo):
+def calcular_tablas_refinadas(archivo, mensual=True):
     """
     Hace todo el procesamiento del CSV crudo: acumulados cada 5 minutos, descarte de outliers
     y acumulados diarios.
 
+    Es el unico camino por el que se calcula lluvia en todo el proyecto. La app, la exportacion
+    de CSV y el informe entran todos por aca, para que ninguno pueda dar un numero distinto de
+    los otros sobre el mismo archivo.
+
     Parametros:
     - archivo: Ruta del CSV exportado de Grafana.
+    - mensual: True acota al mes detectado; False procesa el archivo entero.
 
     Retorna:
     - Tupla (df_5min, df_diario, df_descartes).
     """
-    df_crudo = leer_datos_crudos(archivo)
+    return refinar_crudo(leer_datos_crudos(archivo), mensual)
 
-    df_5min, df_descartes = descartar_outliers(calcular_acumulados_5min(df_crudo))
+
+def refinar_crudo(df_crudo, mensual=True):
+    """
+    Igual que calcular_tablas_refinadas() pero sobre un crudo ya leido.
+
+    La usa el informe, que necesita el crudo aparte para medir la cobertura y no tiene por que
+    volver a leer el archivo ni repetir los pasos del calculo.
+
+    Parametros:
+    - df_crudo: DataFrame con las lecturas crudas (salida de leer_datos_crudos).
+    - mensual: True acota al mes detectado; False procesa el crudo entero.
+
+    Retorna:
+    - Tupla (df_5min, df_diario, df_descartes).
+    """
+    inicio, fin = ventana_del_mes(df_crudo) if mensual else ventana_del_archivo(df_crudo)
+
+    df_5min, df_descartes = descartar_outliers(calcular_acumulados_5min(df_crudo, inicio, fin))
 
     df_diario = calcular_acumulados_diarios_corte(df_5min)
 
     return df_5min, df_diario, df_descartes
+
+
+def preparar_series(archivo, mensual=True):
+    """
+    Punto de entrada de la interfaz: del CSV crudo salen todas las series que consume la app.
+
+    Se devuelven dos cosas distintas y no hay que confundirlas:
+
+    - df_contador es el contador acumulado del equipo en grilla de 5 minutos, con sus huecos.
+      Sirve solo para los controles de estructura (que pluviometros tienen datos, porcentaje
+      de nulos, saltos temporales). Nunca se usa para calcular lluvia.
+    - df_5min y df_diario son la lluvia, calculada por calcular_tablas_refinadas().
+
+    Parametros:
+    - archivo: Ruta del CSV exportado de Grafana.
+    - mensual: True acota al mes detectado; False procesa todo el archivo (analisis de
+      tormenta, donde el recorte lo elige despues el operario).
+
+    Retorna:
+    - Tupla (df_contador, df_5min, df_diario, df_descartes).
+    """
+    df_contador = leer_archivo_principal(archivo)
+
+    df_5min, df_diario, df_descartes = calcular_tablas_refinadas(archivo, mensual)
+
+    return df_contador, df_5min, df_diario, df_descartes

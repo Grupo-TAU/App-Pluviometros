@@ -1,0 +1,5 @@
+{
+  "crudos": "data/raw",
+  "inumet": "data/inumet",
+  "salida": "outputs"
+}

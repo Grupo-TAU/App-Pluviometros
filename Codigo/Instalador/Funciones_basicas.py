@@ -326,22 +326,21 @@ def leer_archivo_inumet(archivo):
     
     return df_inumet
 
-def acumulados(df_datos):
+def acumulados(df_5min):
     """
-    Calcula los acumulados de precipitaciones a partir de los datos, asegurando que solo se sumen valores positivos.
-    
-    Parámetros:
-    - df_datos: DataFrame con los datos de precipitación.
-    
-    Retorna:
-    - DataFrame con los acumulados.
-    """
-    df_acumulados = df_datos.copy()
+    Acumula la lluvia a lo largo del periodo, para la curva de acumulado de tormenta.
 
-    for pluvio in df_datos.columns:
-        df_acumulados[pluvio] = df_datos[pluvio].diff().apply(lambda x: x if x > 0 else 0).cumsum()
-        
-    return df_acumulados
+    Recibe la lluvia ya calculada por calcular_tablas_refinadas(), asi que aca solo queda
+    sumarla: la diferencia contra el contador del equipo, el descarte de reinicios y el de
+    outliers ya se hicieron una sola vez, en el camino de calculo comun.
+
+    Parametros:
+    - df_5min: DataFrame de lluvia por rango de 5 minutos.
+
+    Retorna:
+    - DataFrame con el acumulado corrido.
+    """
+    return df_5min.fillna(0).cumsum()
 
 def acumulado_total(acumulados):
     """
@@ -374,21 +373,6 @@ def acumulado_diarios_total(df_acumulados_diarios):
     df.loc['Total'] = suma_total
     
     return df
-
-def calcular_instantaneos(df_datos):
-    """
-    Calcula las precipitaciones instantáneas (diferencia entre mediciones consecutivas).
-    
-    Parámetros:
-    - df_datos: DataFrame con los datos de precipitación.
-    
-    Retorna:
-    - DataFrame con las precipitaciones instantáneas.
-    """
-    df_datos = df_datos.diff()
-
-    df_datos = df_datos.map(lambda x: x if x > 0 else 0)
-    return df_datos
 
 def obtener_pluviometros_validos(df_datos):
     """

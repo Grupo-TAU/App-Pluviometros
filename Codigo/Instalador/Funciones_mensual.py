@@ -1,7 +1,14 @@
 from Codigo.Instalador.Funciones_basicas import *
 
-# Establecer la localización en español
-locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
+# Establecer la localización en español. El nombre del locale cambia según la máquina, así que
+# se prueban las variantes habituales: si ninguna existe se sigue con el locale por defecto, ya
+# que los nombres de meses del informe salen de numero_a_mes() y no de strftime.
+for _nombre_locale in ('es_ES.UTF-8', 'es_ES', 'Spanish_Spain.1252', 'es-ES'):
+    try:
+        locale.setlocale(locale.LC_TIME, _nombre_locale)
+        break
+    except locale.Error:
+        continue
 
 lluvia_historico = {
     1: [38.75, 71.50, 120.00, 448.00],
@@ -114,23 +121,6 @@ def graficar_acumulados_barras(df_acumulados_diarios):
     plt.tight_layout()
 
     return fig
-
-def calcular_acumulados_diarios(df_instantaneo):
-    """
-    Calcula los acumulados diarios de precipitaciones sumando los valores por día.
-    
-    Parámetros:
-    - df_instantaneo: DataFrame con los valores instantáneos de precipitación.
-
-    Retorna:
-    - DataFrame con los acumulados diarios por pluviómetro.
-    """
-    df_instantaneo.index = pd.to_datetime(df_instantaneo.index)
-    
-    # Agrupar los datos por día (sin hora) y sumar los valores de lluvia por día para cada pluviómetro
-    df_acumulados_diarios = df_instantaneo.groupby(df_instantaneo.index.date).sum()
-    
-    return df_acumulados_diarios
 
 def graficar_acumulados_diarios(df_acumulados_diarios):
     """
@@ -265,61 +255,3 @@ def cortar_datos_mes_real(mes, df):
     """
     df_filtrado = df[df.index.month == mes]
     return df_filtrado
-
-def cortar_datos_mes_inumet(mes, df):
-    """
-    Filtra y reorganiza el DataFrame para obtener los datos del mes indicado, 
-    incluyendo desde las 07:00 AM del último día del mes anterior.
-    Luego, mueve los datos temporalmente para que el primer día del mes arranque con los valores de las 07:00 AM del último día del mes anterior.
-
-    :param mes: Número del mes (1-12) que se desea filtrar.
-    :param df: DataFrame con índice de tipo datetime.
-    :return: DataFrame filtrado y temporalmente ajustado.
-    """
-    # Asegurar que el índice es datetime
-    df = df.copy()  # Evita modificar el original
-    df.index = pd.to_datetime(df.index)
-
-    # Determinar el año del primer dato disponible
-    año = df.index.year.min()
-
-    # Si el mes es enero, el mes anterior es diciembre del año anterior
-    if mes == 1:
-        mes_anterior = 12
-        año_anterior = año - 1
-    else:
-        mes_anterior = mes - 1
-        año_anterior = año
-
-    # Obtener el último día del mes anterior con datos desde las 07:00 AM
-    df_mes_anterior = df[(df.index.month == mes_anterior) & (df.index.year == año_anterior)]
-    if not df_mes_anterior.empty:
-        ultimo_dia_anterior = df_mes_anterior.index.max().date()
-        df_ultimo_dia = df[(df.index.date == ultimo_dia_anterior) & (df.index.hour >= 7)]
-    else:
-        df_ultimo_dia = pd.DataFrame(columns=df.columns)  # Vacío si no hay datos del mes anterior
-
-    # Filtrar los datos del mes actual hasta el último día a las 07:00 AM
-    df_mes_actual = df[(df.index.month == mes)]
-    if not df_mes_actual.empty:
-        ultimo_dia_mes = df_mes_actual.index.max().date()
-        df_mes_actual = df[(df.index < pd.Timestamp(f"{ultimo_dia_mes} 07:00:00"))]
-
-    # Concatenar ambos
-    df_filtrado = pd.concat([df_ultimo_dia, df_mes_actual])
-
-    # **MOVER TEMPORALMENTE LOS DATOS HACIA ADELANTE**
-    if not df_filtrado.empty:
-        primer_fecha_mes = df_filtrado.index.min()
-
-        # Calcular la diferencia de tiempo hasta las **12:00 PM** del primer día del mes
-        diferencia_tiempo = pd.Timestamp.combine(primer_fecha_mes.date(), time(17, 0)) - primer_fecha_mes
-
-        # Aplicar el ajuste temporal
-        df_filtrado.index = df_filtrado.index + diferencia_tiempo
-
-    return df_filtrado
-
-
-
-
