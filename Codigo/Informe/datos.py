@@ -13,13 +13,17 @@ import pandas as pd
 
 from Codigo.Instalador.Funciones_basicas import eliminar_tildes
 from Codigo.Instalador.Funciones_exportar import (
-    FRECUENCIA, HORA_CORTE, dia_pluviometrico, leer_datos_crudos, refinar_crudo)
+    FRECUENCIA, HORA_CORTE_CIVIL, HORA_CORTE_INUMET, leer_datos_crudos, refinar_crudo,
+    ventana_del_mes)
 
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
          "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
 # Equipos que no miden lluvia y por lo tanto no entran en ningun analisis.
 TIPO_SENSOR_NIVEL = 'SN'
+
+# Holgura en los bordes del export: los equipos reportan cada 5 minutos, no justo en la marca.
+TOLERANCIA_RANGO = pd.Timedelta(minutes=15)
 
 
 def nombre_mes(numero_mes):
@@ -35,11 +39,13 @@ class DatosMes:
     archivo_crudo: str
     exportado: str                    # fecha de modificacion del CSV crudo
     df_5min: pd.DataFrame             # acumulados cada 5 min, columnas = ID de equipo
-    df_diario: pd.DataFrame           # acumulados diarios, columnas = ID de equipo
+    df_diario: pd.DataFrame           # acumulados por dia civil, columnas = ID de equipo
+    df_diario_inumet: pd.DataFrame    # acumulados de 7 a 7, solo para comparar contra INUMET
     df_cobertura: pd.DataFrame        # True si el rango de 5 min tuvo al menos una lectura
     df_descartes: pd.DataFrame        # rangos descartados por outlier
     equipos: pd.DataFrame             # catalogo Lugar/ID/Tipo/Direccion/X/Y
-    inumet: pd.Series = field(default=None)   # acumulado diario de INUMET, indexado por dia
+    inumet: pd.Series = field(default=None)       # acumulado diario de INUMET (de 7 a 7)
+    avisos: list = field(default_factory=list)    # faltantes en el rango del export
 
     @property
     def etiqueta(self):
@@ -55,8 +61,13 @@ class DatosMes:
         return fila['Lugar'].iloc[0] if len(fila) else identificador
 
     def diario_con_inumet(self):
-        """Acumulado diario con la columna INUMET agregada, si esta disponible."""
-        df = self.df_diario.copy()
+        """
+        Acumulado diario de 7 a 7 con la columna INUMET agregada, si esta disponible.
+
+        Es la tabla de las comparaciones contra INUMET: usa su mismo corte de dia para que cada
+        fila compare la misma lluvia.
+        """
+        df = self.df_diario_inumet.copy()
         if self.inumet is not None:
             df['INUMET'] = self.inumet.reindex(df.index)
         return df
@@ -190,6 +201,38 @@ def leer_inumet(ruta, dias):
     return df.dropna(subset=['FECHA']).set_index('FECHA')['INUMET'].reindex(dias)
 
 
+def avisos_de_rango(df_crudo):
+    """
+    Revisa que el CSV crudo cubra todo lo que el informe necesita.
+
+    Hacen falta dos cosas a la vez: las horas del ultimo dia del mes anterior desde las 07:00,
+    para el primer dia de las comparaciones contra INUMET, y el ultimo dia del mes completo
+    hasta las 00:00 del dia 1 siguiente, para el dia civil. Si el export se queda corto el
+    informe se arma igual, pero con esos dias incompletos.
+
+    Parametros:
+    - df_crudo: Lecturas crudas del CSV de Grafana.
+
+    Retorna:
+    - Lista de textos, vacia si el rango alcanza.
+    """
+    desde, _ = ventana_del_mes(df_crudo, HORA_CORTE_INUMET)
+    _, hasta = ventana_del_mes(df_crudo, HORA_CORTE_CIVIL)
+
+    primera, ultima = df_crudo.index.min(), df_crudo.index.max()
+
+    avisos = []
+    if primera > desde + TOLERANCIA_RANGO:
+        avisos.append(f"el export arranca el {primera:%d-%m-%Y %H:%M} y tendria que arrancar el "
+                      f"{desde:%d-%m-%Y %H:%M}: el primer dia de la comparacion con INUMET queda "
+                      f"incompleto")
+    if ultima < hasta - TOLERANCIA_RANGO:
+        avisos.append(f"el export termina el {ultima:%d-%m-%Y %H:%M} y tendria que llegar al "
+                      f"{hasta:%d-%m-%Y %H:%M}: el ultimo dia del mes queda incompleto")
+
+    return avisos
+
+
 def cargar_mes(archivo_crudo, anio, mes, carpeta_base='.', carpeta_inumet=None):
     """
     Procesa el CSV crudo del mes y arma el objeto DatosMes con todo lo necesario.
@@ -205,7 +248,10 @@ def cargar_mes(archivo_crudo, anio, mes, carpeta_base='.', carpeta_inumet=None):
     """
     df_crudo = leer_datos_crudos(archivo_crudo)
 
+    # Todo el informe va por dia civil. Las comparaciones contra INUMET, que mide de 7 a 7,
+    # usan una tabla diaria aparte con ese corte.
     df_5min, df_diario, df_descartes = refinar_crudo(df_crudo)
+    _, df_diario_inumet, _ = refinar_crudo(df_crudo, hora_corte=HORA_CORTE_INUMET)
 
     detectado = df_diario.index[0]
     if (detectado.year, detectado.month) != (anio, mes):
@@ -219,6 +265,7 @@ def cargar_mes(archivo_crudo, anio, mes, carpeta_base='.', carpeta_inumet=None):
 
     df_5min = traducir_a_ids(df_5min, equipos)
     df_diario = traducir_a_ids(df_diario, equipos)
+    df_diario_inumet = traducir_a_ids(df_diario_inumet, equipos)
     df_cobertura = traducir_a_ids(df_cobertura, equipos)
     if not df_descartes.empty:
         mapa = dict(zip(equipos['Lugar'].apply(eliminar_tildes), equipos['ID']))
@@ -229,14 +276,15 @@ def cargar_mes(archivo_crudo, anio, mes, carpeta_base='.', carpeta_inumet=None):
         anio=anio, mes=mes,
         archivo_crudo=archivo_crudo,
         exportado=pd.Timestamp(os.path.getmtime(archivo_crudo), unit='s').strftime('%d-%m-%Y %H:%M'),
-        df_5min=df_5min, df_diario=df_diario, df_cobertura=df_cobertura,
-        df_descartes=df_descartes, equipos=equipos)
+        df_5min=df_5min, df_diario=df_diario, df_diario_inumet=df_diario_inumet,
+        df_cobertura=df_cobertura, df_descartes=df_descartes, equipos=equipos,
+        avisos=avisos_de_rango(df_crudo))
 
     if carpeta_inumet is not None:
         ruta = ruta_plantilla_inumet(carpeta_inumet, anio, mes)
         if not os.path.exists(ruta):
-            crear_plantilla_inumet(carpeta_inumet, anio, mes, df_diario.index)
+            crear_plantilla_inumet(carpeta_inumet, anio, mes, df_diario_inumet.index)
         else:
-            datos.inumet = leer_inumet(ruta, df_diario.index)
+            datos.inumet = leer_inumet(ruta, df_diario_inumet.index)
 
     return datos

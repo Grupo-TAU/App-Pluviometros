@@ -262,11 +262,7 @@ def max_suma_ventana_df(df, ventana):
 
     # Calcular el máximo para cada pluviómetro (columna)
     for columna in df.columns:
-        # Los rangos descartados por outlier vienen en NaN. Se cuentan como 0 y no se saltean
-        # con dropna(): sacarlos correría los rangos siguientes y pegaría lluvia de momentos
-        # distintos dentro de la misma ventana, inflando el máximo. Contarlos como 0 subestima
-        # la ventana afectada, que es el error seguro de los dos.
-        precipitaciones = df[columna].fillna(0).tolist()
+        precipitaciones = df[columna].dropna().tolist()
         sumas_ventana = [sum(precipitaciones[i:i + intervalos]) 
                          for i in range(len(precipitaciones) - intervalos + 1)]
         

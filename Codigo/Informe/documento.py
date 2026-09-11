@@ -37,9 +37,10 @@ TEXTO_ALCANCE = (
     "presion cada 5 minutos. En este informe solamente se analizaran los registros de lluvia.")
 
 NOTA_DIA_PLUVIOMETRICO = (
-    "INUMET considera dias de 7 am a 7 am. Por lo tanto, el primer dia del mes contiene datos "
-    "desde las 7 am del ultimo dia del mes anterior hasta las 7 am del primer dia del mes. "
-    "El ultimo dia contiene datos hasta las 7 am del ultimo dia del mes.")
+    "Los acumulados de la RHM se calculan por dia civil, de 0 a 24 horas. INUMET considera "
+    "dias de 7 am a 7 am, por lo que el analisis de precipitacion acumulada (Figura 4-1) y la "
+    "tabla de correlacion (Tabla 4-2) usan ese mismo corte para comparar la misma lluvia: alli "
+    "el primer dia del mes contiene datos desde las 7 am del ultimo dia del mes anterior.")
 
 
 class InformeWord:
@@ -271,7 +272,8 @@ def _calidad(informe, resultados, rutas_figuras):
         "INUMET y los acumulados diarios de los pluviometros de la RHM. En el eje horizontal se "
         "muestran los cuantiles del acumulado diario registrado por INUMET y en el eje vertical "
         "los de cada pluviometro de la RHM, de forma que los equipos con buena correlacion se "
-        "aproximan a una recta de 45 grados.")
+        "aproximan a una recta de 45 grados. Para que la comparacion sea directa, en este "
+        "analisis los acumulados diarios de la RHM se toman de 7 am a 7 am, como los de INUMET.")
 
     if rutas_figuras.get('qq'):
         informe.figura(rutas_figuras['qq'],
@@ -281,7 +283,8 @@ def _calidad(informe, resultados, rutas_figuras):
 
     informe.titulo('4.3. Analisis de correlacion entre pluviometros', 2)
     informe.parrafo("En la Tabla 4-2 se muestra la correlacion existente entre pluviometros y "
-                    "con INUMET en el periodo de medicion en cuestion.")
+                    "con INUMET en el periodo de medicion en cuestion, con dias de 7 am a "
+                    "7 am como los de INUMET.")
     informe.tabla(resultados['correlacion'], 'Tabla de correlacion entre pluviometros e INUMET.',
                   incluir_indice=True, indice_titulo='INDICES')
 

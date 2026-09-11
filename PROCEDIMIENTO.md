@@ -73,13 +73,14 @@ solo de la app con interfaz gráfica. Lo más simple es clonar el repo entero.
 
 ### 1. Exportar el CSV crudo de Grafana
 
-El rango tiene que ir **desde las 07:00 del último día del mes anterior hasta las 07:00 del
-último día del mes**. Es la convención de INUMET: el día pluviométrico va de 7 a 7, así que la
-lluvia del 1 de agosto es la que cayó entre las 07:00 del 31 de julio y las 07:00 del 1 de agosto.
+El rango tiene que ir **desde las 07:00 del último día del mes anterior hasta las 00:00 del día 1
+del mes siguiente** (para agosto: del 31/07 07:00 al 01/09 00:00). Cubre las dos cosas que usa el
+informe: el mes civil completo, que es la base de todo, y los días de 7 a 7 de INUMET, que solo
+se usan para comparar contra INUMET. Lo que sobra de cada lado lo descarta el cálculo solo.
 
-Si el export arranca a las 07:00 del día 1 en vez del último día del mes anterior, **falta el
-primer día del mes** y no hay forma de recuperarlo después: tampoco está en el archivo del mes
-anterior, que termina justo en ese borde.
+Si el export arranca más tarde, **el primer día de la comparación con INUMET queda incompleto**;
+si termina antes de las 00:00 del día 1, **el último día del mes queda incompleto**. En los dos
+casos la corrida lo avisa en consola con un `AVISO`.
 
 Guardalo como `data/raw/2026-08.csv`, o pasá la ruta con `--crudo`.
 
@@ -165,19 +166,24 @@ entre lecturas crudas consecutivas dentro del rango, descartando las negativas (
 reinicios del contador). En lluvia intensa hay varias lecturas por rango y se suman todas. La
 cadena se reinicia en cada día pluviométrico, así que el primer rango de cada día vale 0.
 
-**Un solo camino de cálculo.** La app, la exportación de CSV y el informe entran todos por
-`calcular_tablas_refinadas()` en `Funciones_exportar.py`. No hay una cuenta para la pantalla y
-otra para el informe: sobre el mismo archivo crudo los tres dan exactamente los mismos números.
-La app lee el archivo dos veces a propósito — el contador en grilla de 5 minutos sirve para los
-controles de estructura (equipos sin datos, porcentaje de nulos, saltos temporales) y no se usa
-nunca para calcular lluvia.
+**Dos cálculos de lluvia, con usos distintos.** Las ventanas de análisis de la app (Mensual y
+Tormenta) calculan la lluvia con `calcular_instantaneos()`: la diferencia entre lecturas
+consecutivas del contador en grilla de 5 minutos, sin bajadas. La exportación de CSV y el
+informe usan `calcular_tablas_refinadas()`, que suma todas las lecturas crudas de cada rango y
+descarta los outliers. Sobre el mismo archivo pueden dar totales algo distintos: la app no
+descarta nada, solo alerta.
 
-**Volver al día civil.** El corte de las 07:00 sale de una sola constante, `HORA_CORTE` en
-`Funciones_exportar.py`. Ponerla en `0` pasa todo el cálculo al día civil (00:00 a 00:00) sin
-tocar nada más: la ventana del mes, el reinicio de las diferencias y la etiqueta de cada día se
-derivan de ella. Es un cambio de una línea, y cambia los números — con el corte a las 07:00 el
-mes arranca a las 07:00 del último día del mes anterior, y con el día civil arranca el día 1 a
-las 00:00, así que el export de Grafana tiene que cubrir el rango que corresponda.
+**Día civil, salvo contra INUMET.** Todo se calcula por día civil (00:00 a 00:00). El corte de
+las 07:00 se usa solo para comparar día a día contra INUMET, que mide de 7 a 7: en la app, la
+tabla de correlación y la gráfica respecto a INUMET de la ventana Mensual; en el informe, la
+Figura 4-1 y la Tabla 4-2. Los acumulados mensuales, la serie diaria, los eventos, la evaluación
+de la red y los CSV van por día civil. Las dos horas están en `HORA_CORTE_CIVIL` y
+`HORA_CORTE_INUMET`, en `Funciones_exportar.py`.
+
+**Alertas de la app.** Las ventanas Mensual y Tormenta marcan, sin tocar los datos, los
+pluviómetros con más de 25 mm en 5 minutos, más de 50 mm en 10 minutos seguidos, o más de 2
+lecturas en un mismo rango de 5 minutos (los equipos reportan una vez cada 5 minutos). Los
+umbrales están en `Funciones_basicas.py`.
 
 **Outliers (4.4).** Se descartan los rangos que superan 25 mm en 5 minutos, y se reportan los
 que superan 50 mm en 10 minutos. Un rango descartado queda en blanco, no en cero: no se sabe
@@ -187,7 +193,7 @@ cuánto llovió realmente. Los descartes se listan en el informe.
 sobre una tabla de cobertura aparte, porque en la tabla de acumulados un rango sin lectura vale
 0 igual que uno con lectura y sin lluvia.
 
-**Eventos de tormenta (6.2).** Días con más de 20 mm en algún equipo o en INUMET. La ventana del
+**Eventos de tormenta (6.2).** Días con más de 20 mm en algún equipo (día civil) o en INUMET (de 7 a 7). La ventana del
 evento es la racha continua de lluvia de la red, permitiendo huecos de hasta 60 minutos,
 recortada hasta quedarse con la ventana más corta que concentra el 99 % de la lluvia, y
 redondeada a la media hora.
@@ -201,8 +207,7 @@ Montevideo de fondo. Es numpy puro: no hace falta QGIS ni scipy.
 
 **Los números cambian según cuándo exportes.** Fiware sigue rellenando datos hacia atrás. El
 informe de agosto 2026 V2 (armado el 3-sep) publica 94.5 mm para Capurro; el mismo mes exportado
-el 7-sep da 110.5 mm. No es un error de cálculo: los dos pipelines, el de la app y este, dan lo
-mismo entre sí. Por eso el informe registra la fecha del export.
+el 7-sep da 110.5 mm. No es un error de cálculo. Por eso el informe registra la fecha del export.
 
 **El fin del evento de tormenta es discutible.** Después de una tormenta suele quedar una cola
 de llovizna de horas aportando décimas de milímetro. El criterio automático del 99 % reproduce
@@ -219,6 +224,8 @@ acumuló 715 mm contra 74 mm de mediana de la red, con 633 mm en un solo día, y
 individual superó los 25 mm. Lo agarra el criterio de correlación con la red, no el de
 intensidad.
 
-**Falta el primer día en varios meses ya exportados.** Marzo, abril, mayo, junio y julio 2026
-arrancan a las 07:00 del día 1 en vez del último día del mes anterior. Hay que re-exportarlos
-para tener el mes completo.
+**Los meses ya exportados no cubren el rango nuevo.** Hasta agosto 2026 los exports terminan a
+las 07:00 del último día del mes, así que con día civil ese día queda incompleto. Además marzo,
+abril, mayo, junio y julio 2026 arrancan a las 07:00 del día 1 en vez del último día del mes
+anterior, lo que deja incompleto el primer día de la comparación con INUMET. Hay que
+re-exportarlos con el rango del paso 1.

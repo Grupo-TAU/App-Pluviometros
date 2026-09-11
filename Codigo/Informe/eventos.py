@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from Codigo.Instalador.Funciones_basicas import duracion_tormenta, precipitacion_tr
-from Codigo.Instalador.Funciones_exportar import FRECUENCIA, dia_pluviometrico
+from Codigo.Instalador.Funciones_exportar import (FRECUENCIA, HORA_CORTE_CIVIL, HORA_CORTE_INUMET,
+                                                  dia_pluviometrico, inicio_del_dia)
 
 # Un dia se considera evento de tormenta si algun equipo (o INUMET) supera este acumulado.
 UMBRAL_EVENTO = 20
@@ -26,14 +27,14 @@ MINUTOS_CORTE = 60
 CONCENTRACION = 0.99
 
 # Margen a cada lado del dia donde se busca el inicio y el fin de la tormenta, ya que el
-# evento no tiene por que quedar contenido en el dia pluviometrico.
+# evento no tiene por que quedar contenido en el dia.
 HORAS_MARGEN = 12
 
 
 @dataclass
 class Evento:
     """Una tormenta: su ventana temporal y lo que registro cada equipo durante ella."""
-    dia: pd.Timestamp             # dia pluviometrico que la contiene
+    dia: pd.Timestamp             # dia con tormenta por el que se detecto
     inicio: pd.Timestamp
     fin: pd.Timestamp
     acumulados: pd.Series         # mm por equipo durante el evento
@@ -61,22 +62,26 @@ def dias_con_evento(datos, descartados=()):
     """
     Identifica los dias del mes que superan el umbral de tormenta.
 
+    Los dias de la RHM son civiles. Los de INUMET van de 7 a 7, asi que un dia que supera el
+    umbral por INUMET se busca en el intervalo de INUMET y no en el dia civil.
+
     Parametros:
     - datos: Instancia de DatosMes.
     - descartados: IDs de equipos excluidos del analisis.
 
     Retorna:
-    - Lista de dias pluviometricos ordenada.
+    - Lista de tuplas (dia, hora_corte), ordenada por el momento en que abre cada dia.
     """
     conservados = [c for c in datos.df_diario.columns if c not in set(descartados)]
 
     supera_rhm = datos.df_diario[conservados].max(axis=1) > UMBRAL_EVENTO
+    dias = [(dia, HORA_CORTE_CIVIL) for dia in datos.df_diario.index[supera_rhm]]
 
-    supera = supera_rhm
     if datos.inumet is not None:
-        supera = supera | (datos.inumet.reindex(datos.df_diario.index).fillna(0) > UMBRAL_EVENTO)
+        supera_inumet = datos.inumet.fillna(0) > UMBRAL_EVENTO
+        dias += [(dia, HORA_CORTE_INUMET) for dia in datos.inumet.index[supera_inumet]]
 
-    return list(datos.df_diario.index[supera])
+    return sorted(dias, key=lambda par: inicio_del_dia([par[0]], par[1])[0])
 
 
 def _redondear_a_media_hora(marca, hacia_arriba):
@@ -91,32 +96,34 @@ def _redondear_a_media_hora(marca, hacia_arriba):
     return base + pd.Timedelta(minutes=30) if hacia_arriba else base
 
 
-def ventana_del_evento(datos, dia, descartados=()):
+def ventana_del_evento(datos, dia, descartados=(), hora_corte=HORA_CORTE_CIVIL):
     """
     Busca el inicio y el fin de la lluvia alrededor de un dia con tormenta.
 
-    El evento no se corta en el borde del dia pluviometrico: se toma la racha continua de
-    lluvia en la red, permitiendo huecos de hasta MINUTOS_CORTE, y se extiende hacia atras y
-    hacia adelante mientras siga lloviendo.
+    El evento no se corta en el borde del dia: se toma la racha continua de lluvia en la red,
+    permitiendo huecos de hasta MINUTOS_CORTE, y se extiende hacia atras y hacia adelante
+    mientras siga lloviendo.
 
     Parametros:
     - datos: Instancia de DatosMes.
-    - dia: Dia pluviometrico con tormenta.
+    - dia: Dia con tormenta.
     - descartados: IDs de equipos excluidos del analisis.
+    - hora_corte: Corte con el que se definio el dia: civil, o de 7 a 7 si lo marco INUMET.
 
     Retorna:
     - Tupla (inicio, fin) redondeada a la media hora.
     """
     conservados = [c for c in datos.df_diario.columns if c not in set(descartados)]
 
-    margen = pd.Timedelta(hours=HORAS_MARGEN)
-    desde, hasta = dia - pd.Timedelta(days=1) - margen, dia + margen
+    abre = inicio_del_dia([dia], hora_corte)[0]
+    cierra = abre + pd.Timedelta(days=1)
 
-    ventana = datos.df_5min.loc[desde:hasta, conservados]
+    margen = pd.Timedelta(hours=HORAS_MARGEN)
+    ventana = datos.df_5min.loc[abre - margen:cierra + margen, conservados]
     llueve = ventana.sum(axis=1) > 0
 
     if not llueve.any():
-        return dia - pd.Timedelta(days=1), dia
+        return abre, cierra
 
     # Se agrupan las rachas de lluvia separadas por huecos largos.
     marcas = llueve[llueve].index
@@ -124,7 +131,7 @@ def ventana_del_evento(datos, dia, descartados=()):
     grupo = corte.cumsum()
 
     # De las rachas que tocan el dia, se elige la que mas lluvia acumulo.
-    del_dia = dia_pluviometrico(marcas) == dia
+    del_dia = dia_pluviometrico(marcas, hora_corte) == dia
     candidatos = set(grupo[del_dia])
     if not candidatos:
         candidatos = set(grupo)
@@ -174,21 +181,22 @@ def _recortar_llovizna(lluvia_de_la_red):
     return marcas[mejor[0]], marcas[mejor[1]]
 
 
-def construir_evento(datos, dia, descartados=()):
+def construir_evento(datos, dia, descartados=(), hora_corte=HORA_CORTE_CIVIL):
     """
     Arma el objeto Evento para un dia con tormenta.
 
     Parametros:
     - datos: Instancia de DatosMes.
-    - dia: Dia pluviometrico con tormenta.
+    - dia: Dia con tormenta.
     - descartados: IDs de equipos excluidos del analisis.
+    - hora_corte: Corte con el que se definio el dia: civil, o de 7 a 7 si lo marco INUMET.
 
     Retorna:
     - Instancia de Evento.
     """
     conservados = [c for c in datos.df_diario.columns if c not in set(descartados)]
 
-    inicio, fin = ventana_del_evento(datos, dia, descartados)
+    inicio, fin = ventana_del_evento(datos, dia, descartados, hora_corte)
 
     del_evento = datos.df_5min.loc[inicio:fin - pd.Timedelta(FRECUENCIA), conservados]
 
@@ -207,8 +215,8 @@ def construir_evento(datos, dia, descartados=()):
 
 def detectar_eventos(datos, descartados=()):
     """
-    Detecta todos los eventos de tormenta del mes, fusionando los dias contiguos que en
-    realidad son la misma tormenta.
+    Detecta todos los eventos de tormenta del mes, fusionando los dias que en realidad son la
+    misma tormenta.
 
     Parametros:
     - datos: Instancia de DatosMes.
@@ -218,16 +226,17 @@ def detectar_eventos(datos, descartados=()):
     - Lista de Eventos ordenada cronologicamente.
     """
     eventos = []
-    for dia in dias_con_evento(datos, descartados):
-        evento = construir_evento(datos, dia, descartados)
+    for dia, hora_corte in dias_con_evento(datos, descartados):
+        evento = construir_evento(datos, dia, descartados, hora_corte)
 
-        # Dos dias seguidos por encima del umbral pueden caer en la misma racha de lluvia.
-        if eventos and evento.inicio == eventos[-1].inicio:
+        # Dos dias seguidos por encima del umbral, o el mismo dia visto por la RHM y por INUMET,
+        # pueden caer en la misma racha de lluvia.
+        if any(evento.inicio == previo.inicio for previo in eventos):
             continue
 
         eventos.append(evento)
 
-    return eventos
+    return sorted(eventos, key=lambda evento: evento.inicio)
 
 
 def maximos_por_duracion(evento):
@@ -316,7 +325,8 @@ def resumen_periodos_de_retorno(tabla_maximos):
 
 def acumulado_inumet_del_evento(datos, evento):
     """
-    Acumulado de INUMET correspondiente al evento: la suma de sus dias pluviometricos tocados.
+    Acumulado de INUMET correspondiente al evento: la suma de los dias de INUMET (de 7 a 7)
+    que toca.
 
     Parametros:
     - datos: Instancia de DatosMes.
@@ -329,6 +339,6 @@ def acumulado_inumet_del_evento(datos, evento):
         return None
 
     marcas = pd.date_range(evento.inicio, evento.fin - pd.Timedelta(FRECUENCIA), freq=FRECUENCIA)
-    dias = pd.Index(dia_pluviometrico(marcas)).unique()
+    dias = pd.Index(dia_pluviometrico(marcas, HORA_CORTE_INUMET)).unique()
 
     return round(datos.inumet.reindex(dias).sum(min_count=1), 1)

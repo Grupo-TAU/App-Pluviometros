@@ -191,6 +191,8 @@ def main():
     print(f"  exportado de Grafana el {datos.exportado}")
     print(f"  {datos.df_diario.shape[1]} equipos, {len(datos.df_diario)} dias, "
           f"{len(datos.df_5min)} rangos de 5 min")
+    for aviso in datos.avisos:
+        print(f"  AVISO: {aviso}")
 
     # ---------------------------------------------------------------- validacion
     print("\nValidacion del acumulado diario contra el CSV crudo:")

@@ -5,13 +5,11 @@ import numpy as np
 import pandas as pd
 
 from Codigo.Instalador.Funciones_exportar import (
-    FRECUENCIA, UMBRAL_ALTO, UMBRAL_BAJO, UMBRAL_OUTLIER_5MIN, dia_pluviometrico)
+    FRECUENCIA, UMBRAL_ALTO, UMBRAL_BAJO, UMBRAL_OUTLIER_5MIN, UMBRAL_OUTLIER_10MIN,
+    dia_pluviometrico)
 
 # Un equipo se descarta del analisis si le falta mas de esta fraccion del mes.
 UMBRAL_DATOS_FALTANTES = 0.5
-
-# Segundo criterio de outlier del informe: lluvia acumulada en 10 minutos seguidos.
-UMBRAL_OUTLIER_10MIN = 50
 
 # Correlacion minima contra el dia tipico de la red para considerar consistente a un equipo.
 UMBRAL_CORRELACION = 0.7
@@ -47,7 +45,8 @@ def datos_faltantes(datos):
 def matriz_correlacion(datos):
     """
     Seccion 4.3: correlacion de Pearson entre los acumulados diarios de todos los equipos,
-    con INUMET incluido si esta disponible.
+    con INUMET incluido si esta disponible. Es una comparacion contra INUMET, asi que los dias
+    van de 7 a 7, como los suyos.
 
     Se conserva solo el triangulo superior, que es como se presenta en la Tabla 4-1.
 
@@ -266,7 +265,7 @@ def evaluacion_de_la_red(datos, dia):
 
     Parametros:
     - datos: Instancia de DatosMes.
-    - dia: Dia pluviometrico a evaluar.
+    - dia: Dia civil a evaluar.
 
     Retorna:
     - DataFrame con ID, Lugar, Analisis y Lectura.

@@ -326,21 +326,22 @@ def leer_archivo_inumet(archivo):
     
     return df_inumet
 
-def acumulados(df_5min):
+def acumulados(df_datos):
     """
-    Acumula la lluvia a lo largo del periodo, para la curva de acumulado de tormenta.
-
-    Recibe la lluvia ya calculada por calcular_tablas_refinadas(), asi que aca solo queda
-    sumarla: la diferencia contra el contador del equipo, el descarte de reinicios y el de
-    outliers ya se hicieron una sola vez, en el camino de calculo comun.
-
-    Parametros:
-    - df_5min: DataFrame de lluvia por rango de 5 minutos.
-
+    Calcula los acumulados de precipitaciones a partir de los datos, asegurando que solo se sumen valores positivos.
+    
+    Parámetros:
+    - df_datos: DataFrame con los datos de precipitación.
+    
     Retorna:
-    - DataFrame con el acumulado corrido.
+    - DataFrame con los acumulados.
     """
-    return df_5min.fillna(0).cumsum()
+    df_acumulados = df_datos.copy()
+
+    for pluvio in df_datos.columns:
+        df_acumulados[pluvio] = df_datos[pluvio].diff().apply(lambda x: x if x > 0 else 0).cumsum()
+        
+    return df_acumulados
 
 def acumulado_total(acumulados):
     """
@@ -373,6 +374,125 @@ def acumulado_diarios_total(df_acumulados_diarios):
     df.loc['Total'] = suma_total
     
     return df
+
+def calcular_instantaneos(df_datos):
+    """
+    Calcula las precipitaciones instantáneas (diferencia entre mediciones consecutivas).
+    
+    Parámetros:
+    - df_datos: DataFrame con los datos de precipitación.
+    
+    Retorna:
+    - DataFrame con las precipitaciones instantáneas.
+    """
+    df_datos = df_datos.diff()
+
+    df_datos = df_datos.map(lambda x: x if x > 0 else 0)
+    return df_datos
+
+# Umbrales de datos posiblemente erroneos. Por encima de esto no se toma como lluvia sino como
+# falla del equipo: 25 mm en 5 minutos equivalen a 300 mm/h sostenidos, muy por encima de
+# cualquier intensidad real en Montevideo. La app los usa para alertar sin tocar los datos; la
+# exportacion y el informe descartan los rangos de 5 minutos que superan el primero.
+UMBRAL_OUTLIER_5MIN = 25
+UMBRAL_OUTLIER_10MIN = 50
+
+# Los equipos reportan una vez cada 5 minutos. En los datos reales los sanos nunca pasan de 2
+# lecturas en un mismo rango; mas que eso es un equipo que repite o duplica datos.
+UMBRAL_LECTURAS_5MIN = 2
+
+def contar_lecturas_por_rango(archivo):
+    """
+    Cuenta cuantas lecturas mando cada pluviometro en cada rango de 5 minutos.
+
+    Hay que leer el CSV crudo porque leer_archivo_principal() se queda con una sola lectura por
+    rango. Los rangos son los mismos que arma leer_archivo_principal() (redondeo a 5 minutos),
+    para que las alertas caigan en las mismas marcas de tiempo que la lluvia de la app.
+
+    Parametros:
+    - archivo: Ruta del CSV exportado de Grafana.
+
+    Retorna:
+    - DataFrame indexado por rango, con una columna por pluviometro (nombres sin tildes).
+    """
+    df_datos = pd.read_csv(archivo, encoding="utf-8")
+
+    df_datos['Time'] = pd.to_datetime(df_datos['Time'], **detectar_formato_fecha(df_datos['Time']))
+
+    lecturas = df_datos.set_index('Time').notna()
+
+    df_lecturas = lecturas.groupby(lecturas.index.round('5min')).sum()
+    df_lecturas.columns = [eliminar_tildes(col) for col in df_lecturas.columns]
+
+    return df_lecturas
+
+def detectar_alertas(df_instantaneo, df_lecturas, df_config):
+    """
+    Marca los pluviometros que pueden estar dando datos erroneos.
+
+    Criterios:
+    - Mas de UMBRAL_OUTLIER_5MIN mm en un rango de 5 minutos.
+    - Mas de UMBRAL_OUTLIER_10MIN mm en 10 minutos seguidos.
+    - Mas de UMBRAL_LECTURAS_5MIN lecturas en un mismo rango de 5 minutos.
+
+    Es una alerta y no un descarte: los datos no se tocan, se le avisa al operario que los revise.
+
+    Parametros:
+    - df_instantaneo: DataFrame con la lluvia cada 5 minutos (salida de calcular_instantaneos),
+      ya recortado al periodo que se esta analizando.
+    - df_lecturas: Conteo de lecturas por rango (salida de contar_lecturas_por_rango).
+    - df_config: DataFrame con la configuracion de lugares e IDs.
+
+    Retorna:
+    - DataFrame con una fila por pluviometro y criterio: Pluviómetro, Alerta, Ocurrencias,
+      Máximo, Primera y Última.
+    """
+    columnas = ['Pluviómetro', 'Alerta', 'Ocurrencias', 'Máximo', 'Primera', 'Última']
+    filas = []
+
+    def agregar(pluvio, alerta, marcas, ocurrencias, maximo):
+        filas.append({
+            'Pluviómetro': traducir_id_a_lugar(df_config, pluvio) or pluvio,
+            'Alerta': alerta,
+            'Ocurrencias': ocurrencias,
+            'Máximo': maximo,
+            'Primera': marcas.min().strftime('%d-%m-%Y %H:%M'),
+            'Última': marcas.max().strftime('%d-%m-%Y %H:%M'),
+        })
+
+    # Las lecturas salen del CSV crudo con los nombres de lugar, y la lluvia puede venir ya con
+    # los ID de la configuracion. Se las alinea y se las recorta al mismo periodo.
+    lugar_a_id = dict(zip(df_config['Lugar'], df_config['ID']))
+    df_lecturas = df_lecturas.rename(
+        columns=lambda col: col if col in df_instantaneo.columns else lugar_a_id.get(col, col))
+    df_lecturas = df_lecturas[(df_lecturas.index >= df_instantaneo.index.min()) &
+                              (df_lecturas.index <= df_instantaneo.index.max())]
+
+    # Dos rangos de 5 minutos consecutivos: la ventana (t - 10 min, t].
+    en_10min = df_instantaneo.rolling('10min').sum()
+
+    for pluvio in df_instantaneo.columns:
+        serie = df_instantaneo[pluvio]
+        excesos = serie[serie > UMBRAL_OUTLIER_5MIN]
+        if not excesos.empty:
+            agregar(pluvio, f'Más de {UMBRAL_OUTLIER_5MIN} mm en 5 min', excesos.index,
+                    len(excesos), f'{excesos.max():.2f} mm')
+
+        ventanas = en_10min[pluvio][en_10min[pluvio] > UMBRAL_OUTLIER_10MIN]
+        if not ventanas.empty:
+            # Un mismo exceso cae en varias ventanas seguidas: cada racha cuenta una sola vez.
+            rachas = int((ventanas.index.to_series().diff() != pd.Timedelta('5min')).sum())
+            agregar(pluvio, f'Más de {UMBRAL_OUTLIER_10MIN} mm en 10 min', ventanas.index,
+                    rachas, f'{ventanas.max():.2f} mm')
+
+        if pluvio in df_lecturas.columns:
+            conteo = df_lecturas[pluvio]
+            repetidos = conteo[conteo > UMBRAL_LECTURAS_5MIN]
+            if not repetidos.empty:
+                agregar(pluvio, f'Más de {UMBRAL_LECTURAS_5MIN} lecturas en 5 min', repetidos.index,
+                        len(repetidos), f'{int(repetidos.max())} lecturas')
+
+    return pd.DataFrame(filas, columns=columnas)
 
 def obtener_pluviometros_validos(df_datos):
     """

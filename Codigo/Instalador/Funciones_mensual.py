@@ -1,4 +1,5 @@
 from Codigo.Instalador.Funciones_basicas import *
+from Codigo.Instalador.Funciones_exportar import HORA_CORTE_INUMET, dia_pluviometrico
 
 # Establecer la localización en español. El nombre del locale cambia según la máquina, así que
 # se prueban las variantes habituales: si ninguna existe se sigue con el locale por defecto, ya
@@ -121,6 +122,23 @@ def graficar_acumulados_barras(df_acumulados_diarios):
     plt.tight_layout()
 
     return fig
+
+def calcular_acumulados_diarios(df_instantaneo):
+    """
+    Calcula los acumulados diarios de precipitaciones sumando los valores por día.
+    
+    Parámetros:
+    - df_instantaneo: DataFrame con los valores instantáneos de precipitación.
+
+    Retorna:
+    - DataFrame con los acumulados diarios por pluviómetro.
+    """
+    df_instantaneo.index = pd.to_datetime(df_instantaneo.index)
+    
+    # Agrupar los datos por día (sin hora) y sumar los valores de lluvia por día para cada pluviómetro
+    df_acumulados_diarios = df_instantaneo.groupby(df_instantaneo.index.date).sum()
+    
+    return df_acumulados_diarios
 
 def graficar_acumulados_diarios(df_acumulados_diarios):
     """
@@ -255,3 +273,28 @@ def cortar_datos_mes_real(mes, df):
     """
     df_filtrado = df[df.index.month == mes]
     return df_filtrado
+
+def calcular_acumulados_diarios_inumet(df_instantaneo, mes):
+    """
+    Calcula los acumulados diarios del mes con el corte de las 07:00, para compararlos con INUMET.
+
+    INUMET mide de 7 a 7 y anota la lluvia con la fecha de cierre: la del 01/08 es la que cayo
+    entre las 07:00 del 31/07 y las 07:00 del 01/08. El resto de la app usa el dia civil; este
+    corte es solo para la comparacion contra INUMET.
+
+    Parámetros:
+    - df_instantaneo: DataFrame con la lluvia cada 5 minutos (salida de calcular_instantaneos),
+      sin recortar al mes: el primer dia necesita las horas del ultimo dia del mes anterior.
+    - mes: Número del mes (1-12).
+
+    Retorna:
+    - DataFrame con una fila por dia del mes y una columna por pluviómetro.
+    """
+    df_instantaneo = df_instantaneo.copy()
+    df_instantaneo.index = pd.to_datetime(df_instantaneo.index)
+
+    dias = dia_pluviometrico(df_instantaneo.index, HORA_CORTE_INUMET)
+
+    df_acumulados_diarios = df_instantaneo.groupby(dias).sum()
+
+    return df_acumulados_diarios[df_acumulados_diarios.index.month == mes]

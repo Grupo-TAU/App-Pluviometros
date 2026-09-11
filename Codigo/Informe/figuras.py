@@ -120,7 +120,8 @@ def qq_contra_inumet(datos, descartados=()):
 
     conservados = [c for c in datos.df_diario.columns if c not in set(descartados)]
 
-    df = datos.df_diario[conservados].copy()
+    # Comparacion contra INUMET: dias de 7 a 7, como los suyos.
+    df = datos.df_diario_inumet[conservados].copy()
     df['INUMET'] = datos.inumet.reindex(df.index)
 
     # Se sacan los dias sin lluvia, que solo amontonan puntos en el origen.
